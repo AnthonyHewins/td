@@ -29,6 +29,10 @@ type Token struct {
 	Expires      time.Time `json:"expires"`
 }
 
+func (t *Token) Expired() bool {
+	return time.Now().After(t.Expires)
+}
+
 type tokenResp struct {
 	ExpiresIn    int64  `json:"expires_in"`
 	TokenType    string `json:"token_type"`
@@ -38,7 +42,7 @@ type tokenResp struct {
 	IdToken      string `json:"id_token"`
 }
 
-func (c *Client) refresh(ctx context.Context) error {
+func (c *HTTPClient) refresh(ctx context.Context) error {
 	c.tm.mu.Lock()
 	defer c.tm.mu.Unlock()
 

@@ -15,10 +15,11 @@ var (
 	ErrMissingPeriodType    = errors.New("missing period type")
 	ErrMissingFrequencyType = errors.New("missing frequency type")
 	ErrMissingSymbol        = errors.New("missing symbol")
+	ErrInvalidSymbol        = errors.New("symbols must be 5 characters or less")
 	ErrMissingReq           = errors.New("missing request object")
 )
 
-//go:generate enumer -type HistoryPeriod -json -trimprefix HistoryPeriod -transform lower
+//go:generate enumer -type PeriodType -json -trimprefix PeriodType -transform lower
 type PeriodType byte
 
 const (
@@ -103,7 +104,7 @@ type Candle struct {
 	Volume   float64 `json:"volume"`
 }
 
-func (c *Client) PriceHistory(ctx context.Context, symbol string, req *PriceHistoryReq) ([]Candle, error) {
+func (c *HTTPClient) PriceHistory(ctx context.Context, symbol string, req *PriceHistoryReq) ([]Candle, error) {
 	switch {
 	case symbol == "":
 		return nil, ErrMissingSymbol

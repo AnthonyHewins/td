@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -14,29 +15,42 @@ const (
 	ProdURL = "https://api.schwabapi.com/trader/v1/"
 )
 
-type Client struct {
+// HTTP client is the client for http requests via schwab.
+// You need it for at least fetching a token. The websocket client is
+// the preferred client method due to better latency all around
+type HTTPClient struct {
 	key, secret, baseURL, authURL string
+	logger                        *slog.Logger
 	http                          *http.Client
 	tm                            tokenManager
 }
 
-type ClientOpt func(c *Client)
+type HTTPClientOpt func(c *HTTPClient)
 
-func WithHTTPClient(h *http.Client) ClientOpt {
+func WithUnderlyingHTTPClient(h *http.Client) HTTPClientOpt {
 	if h == nil {
 		h = http.DefaultClient
 	}
 
-	return func(c *Client) { c.http = h }
+	return func(c *HTTPClient) { c.http = h }
 }
 
-func WithToken(t Token) ClientOpt {
-	return func(c *Client) { c.tm.t = t }
+func WithToken(t Token) HTTPClientOpt {
+	return func(c *HTTPClient) { c.tm.t = t }
 }
 
-func New(baseURL, authURL, key, secret string, opts ...ClientOpt) *Client {
-	c := &Client{
+func WithClientLogger(l slog.Handler) HTTPClientOpt {
+	if l == nil {
+		l = slog.DiscardHandler
+	}
+
+	return func(c *HTTPClient) { c.logger = slog.New(l) }
+}
+
+func New(baseURL, authURL, key, secret string, opts ...HTTPClientOpt) *HTTPClient {
+	c := &HTTPClient{
 		http:    http.DefaultClient,
+		logger:  slog.New(slog.DiscardHandler),
 		baseURL: baseURL,
 		authURL: AuthUrl,
 	}
@@ -48,7 +62,7 @@ func New(baseURL, authURL, key, secret string, opts ...ClientOpt) *Client {
 	return c
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body, target any) error {
+func (c *HTTPClient) do(ctx context.Context, method, path string, body, target any) error {
 	var toSend io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -78,9 +92,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, target any) 
 		return fmt.Errorf("HTTP %d: %s", x, buf)
 	}
 
-	if err := json.Unmarshal(buf, target); err != nil {
-		return err
+	if target != nil {
+		err = json.Unmarshal(buf, target)
 	}
 
-	return nil
+	return err
 }

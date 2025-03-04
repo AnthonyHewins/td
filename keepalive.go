@@ -89,7 +89,7 @@ func (s *WS) keepalive() {
 		go func(b []byte) {
 			var r streamResp
 			if err := json.Unmarshal(b, &r); err != nil {
-				s.errHandler(fmt.Errorf("failed reading socket response: %w\nRaw: %s", b))
+				s.errHandler(fmt.Errorf("failed reading socket response: %w\nRaw: %s", err, b))
 				return
 			}
 

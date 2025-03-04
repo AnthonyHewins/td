@@ -97,7 +97,7 @@ func NewSocket(ctx context.Context, uri string, opts *websocket.DialOptions, use
 	}
 
 	if s.errHandler == nil {
-		s.errHandler = func(err error) { s.logger.Error("error received from keepalive", "err", err) }
+		s.errHandler = func(err error) { s.logger.Error("error received from keepalive", "keepalive", true, "err", err) }
 	}
 
 	var err error

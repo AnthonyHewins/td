@@ -195,7 +195,7 @@ func (e *ExchangeID) UnmarshalJSON(b []byte) error {
 	case 'U':
 		*e = ExchangeIDOtcbb
 	default:
-		return fmt.Errorf("invalid char representing exchange ID: %s", x)
+		return fmt.Errorf("invalid char representing exchange ID: %s", string(x))
 	}
 
 	return nil

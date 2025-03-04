@@ -45,7 +45,7 @@ func (s *socketReq) equal(x *socketReq) bool {
 func (s *socketReq) String() string {
 	return fmt.Sprintf(
 		"{Deadline: %s, RequestID: %d}",
-		s.deadline, s.id,
+		s.deadline.Format(time.RFC3339), s.id,
 	)
 }
 
@@ -60,10 +60,9 @@ func newInvalidReq(id requestID) *socketReq {
 }
 
 func TestPub(mainTest *testing.T) {
-
 	testCases := []struct {
 		name  string
-		msg   apiResp
+		msg   []apiResp
 		start *fanoutMutex
 		end   *fanoutMutex
 	}{
@@ -75,22 +74,21 @@ func TestPub(mainTest *testing.T) {
 		{
 			name: "removes an event that's past its deadline in case of a write error",
 			start: &fanoutMutex{
-				channels: []*socketReq{{c: make(chan *apiResp)}},
+				channels: []*socketReq{{c: make(chan *apiResp, 1)}},
 			},
 			end: &fanoutMutex{},
 		},
 		{
 			name: "removes a channel after delivering its msg",
+			msg:  []apiResp{{}},
 			start: &fanoutMutex{
-				channels: []*socketReq{
-					{deadline: time.Now().Add(time.Second), c: make(chan *apiResp, 1)},
-				},
+				channels: []*socketReq{newValidReq(0), newValidReq(1)},
 			},
-			end: &fanoutMutex{},
+			end: &fanoutMutex{channels: []*socketReq{newValidReq(1)}},
 		},
 		{
-			name: "stable in removal of elements",
-			msg:  apiResp{RequestID: 4},
+			name: "random example",
+			msg:  []apiResp{{RequestID: 4}},
 			start: &fanoutMutex{
 				channels: []*socketReq{
 					newValidReq(1),
@@ -106,14 +104,18 @@ func TestPub(mainTest *testing.T) {
 					newValidReq(1),
 					newValidReq(2),
 					newValidReq(3),
-					newValidReq(5),
 					newValidReq(6),
+					newValidReq(5),
 				},
 			},
 		},
 		{
 			name: "example with various removals: removing several invalids, and ID#27 (unrealistic state, but also still recovers)",
-			msg:  apiResp{RequestID: 27},
+			msg: []apiResp{
+				{RequestID: 27},
+				{RequestID: 9562},
+				{RequestID: 21},
+			},
 			start: &fanoutMutex{
 				channels: []*socketReq{
 					newValidReq(3),
@@ -129,7 +131,6 @@ func TestPub(mainTest *testing.T) {
 					newValidReq(26),
 					newInvalidReq(94332),
 					newInvalidReq(11111192),
-					newValidReq(21),
 					newInvalidReq(912232),
 					newInvalidReq(9122),
 					newValidReq(27),
@@ -144,13 +145,11 @@ func TestPub(mainTest *testing.T) {
 				channels: []*socketReq{
 					newValidReq(3),
 					newValidReq(1),
-					newValidReq(2),
-					newValidReq(5),
 					newValidReq(26),
-					newValidReq(21),
-					newValidReq(24),
+					newValidReq(2),
 					newValidReq(6),
-					newValidReq(21),
+					newValidReq(5),
+					newValidReq(24),
 				},
 			},
 		},
@@ -158,7 +157,11 @@ func TestPub(mainTest *testing.T) {
 
 	for _, tc := range testCases {
 		mainTest.Run(tc.name, func(tt *testing.T) {
-			tc.start.pub([]apiResp{tc.msg})
+			if len(tc.msg) == 0 {
+				tc.msg = []apiResp{{}}
+			}
+
+			tc.start.pub(tc.msg)
 			if !tc.start.equal(tc.end) {
 				tt.Errorf(
 					"final state not correct\nexpected: %+v\nactual: %+v",

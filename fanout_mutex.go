@@ -24,7 +24,7 @@ type fanoutMutex struct {
 type requestID uint
 
 func (r requestID) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%d"`, r)), nil
+	return fmt.Appendf(nil, `"%d"`, r), nil
 }
 
 func (r *requestID) UnmarshalJSON(b []byte) error {
@@ -103,40 +103,63 @@ func (f *fanoutMutex) pub(requests []apiResp) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	goodPtr := 0
-	for i, n := 0, len(f.channels); i < n; i++ {
-		v := f.channels[i]
-		if v.deadline.Before(time.Now()) {
-			close(v.c)
-			continue
-		}
-
-		found := false
-		for i := range requests {
-			r := &requests[i]
-			if found = v.id == r.RequestID; !found {
+	for idx := range requests {
+		for i, n, v := 0, len(f.channels), &requests[idx]; i < n; {
+			c := f.channels[i]
+			if c.deadline.Before(time.Now()) {
+				f.channels[i] = f.channels[n-1]
+				f.channels = f.channels[:n-1]
+				n--
 				continue
 			}
 
-			v.c <- r
-			close(v.c)
-			n := len(requests)
-			if n <= 1 {
-				return
+			if c.id != v.RequestID {
+				i++
+				continue
 			}
 
-			requests[i] = requests[n-1]
-			requests = requests[:n-1]
-			break
+			c.c <- v
+			close(c.c)
+			f.channels[i] = f.channels[n-1]
+			f.channels = f.channels[:n-1]
+			n--
 		}
-
-		if found {
-			continue
-		}
-
-		f.channels[goodPtr] = v
-		goodPtr++
 	}
+	// goodPtr := 0
+	// for i, n := 0, len(f.channels); i < n; i++ {
+	// 	v := f.channels[i]
+	// 	if v.deadline.Before(time.Now()) {
+	// 		close(v.c)
+	// 		continue
+	// 	}
 
-	f.channels = f.channels[:goodPtr]
+	// 	found := false
+	// 	for i := range requests {
+	// 		r := &requests[i]
+	// 		if found = v.id == r.RequestID; !found {
+	// 			continue
+	// 		}
+
+	// 		v.c <- r
+	// 		close(v.c)
+	// 		m := len(requests)
+	// 		if m <= 1 {
+	// 			f.channels=f.channels[:goodPtr]
+	// 			return
+	// 		}
+
+	// 		fmt.Println(requests)
+	// 		requests[i] = requests[m-1]
+	// 		requests = requests[:m-1]
+	// 		fmt.Println(requests)
+	// 		break
+	// 	}
+
+	// 	if found {
+	// 		continue
+	// 	}
+
+	// 	f.channels[goodPtr] = v
+	// 	goodPtr++
+	// }
 }

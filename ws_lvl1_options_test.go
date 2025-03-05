@@ -3,6 +3,7 @@ package td
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestOptionIDString(mainTest *testing.T) {
@@ -10,7 +11,15 @@ func TestOptionIDString(mainTest *testing.T) {
 		arg      OptionID
 		expected string
 	}{
-		{arg: OptionID{}},
+		{
+			arg: OptionID{
+				Symbol:     "AAPL",
+				Expiration: time.Date(2027, 1, 2, 3, 4, 5, 6, time.UTC),
+				Side:       OptionSidePut,
+				Strike:     123.456,
+			},
+			expected: "AAPL 20270102P00123456",
+		},
 	}
 
 	for _, tc := range testCases {

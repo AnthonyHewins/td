@@ -153,12 +153,12 @@ type OptionID struct {
 // e.g.: AAPL  251219C00200000
 func (o *OptionID) String() string {
 	return fmt.Sprintf(
-		"%5s%s%s%5d%3d",
+		"%-5s%s%s%05d%03d",
 		o.Symbol,
 		o.Expiration.Format(optionExpirationFmt),
 		o.Side,
 		int(o.Strike),
-		int(o.Strike*1000)/1000,
+		int(o.Strike*1000)%1000,
 	)
 }
 

@@ -107,9 +107,9 @@ func (f *fanoutMutex) pub(requests []apiResp) {
 		for i, n, v := 0, len(f.channels), &requests[idx]; i < n; {
 			c := f.channels[i]
 			if c.deadline.Before(time.Now()) {
-				f.channels[i] = f.channels[n-1]
-				f.channels = f.channels[:n-1]
 				n--
+				f.channels[i] = f.channels[n]
+				f.channels = f.channels[:n]
 				continue
 			}
 
@@ -120,46 +120,9 @@ func (f *fanoutMutex) pub(requests []apiResp) {
 
 			c.c <- v
 			close(c.c)
-			f.channels[i] = f.channels[n-1]
-			f.channels = f.channels[:n-1]
 			n--
+			f.channels[i] = f.channels[n]
+			f.channels = f.channels[:n]
 		}
 	}
-	// goodPtr := 0
-	// for i, n := 0, len(f.channels); i < n; i++ {
-	// 	v := f.channels[i]
-	// 	if v.deadline.Before(time.Now()) {
-	// 		close(v.c)
-	// 		continue
-	// 	}
-
-	// 	found := false
-	// 	for i := range requests {
-	// 		r := &requests[i]
-	// 		if found = v.id == r.RequestID; !found {
-	// 			continue
-	// 		}
-
-	// 		v.c <- r
-	// 		close(v.c)
-	// 		m := len(requests)
-	// 		if m <= 1 {
-	// 			f.channels=f.channels[:goodPtr]
-	// 			return
-	// 		}
-
-	// 		fmt.Println(requests)
-	// 		requests[i] = requests[m-1]
-	// 		requests = requests[:m-1]
-	// 		fmt.Println(requests)
-	// 		break
-	// 	}
-
-	// 	if found {
-	// 		continue
-	// 	}
-
-	// 	f.channels[goodPtr] = v
-	// 	goodPtr++
-	// }
 }

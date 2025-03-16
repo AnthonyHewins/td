@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 	"time"
@@ -51,11 +52,11 @@ func (s *WS) closeErr(err error) {
 	}
 }
 
-func (s *WS) ping() {
+func (s *WS) ping(ctx context.Context) {
 	t := time.NewTicker(s.pingEvery)
 	defer t.Stop()
 
-	for done := s.connCtx.Done(); ; {
+	for done := ctx.Done(); ; {
 		select {
 		case <-done:
 			return
@@ -67,36 +68,128 @@ func (s *WS) ping() {
 	}
 }
 
-func (s *WS) keepalive() {
+func (s *WS) keepalive(ctx context.Context) {
+	ch := make(chan []byte, 10)
+	go s.ping(ctx)
+	go s.deserialize(ctx, ch)
 	for {
-		_, buf, err := s.ws.Read(s.connCtx)
+		buf, err := s.read(ctx)
 		if err != nil {
-			switch {
-			case errors.Is(err, context.Canceled):
-				s.Close()
-			case err == net.ErrClosed:
-				s.cancel()
-				s.errHandler(err)
-			default:
-				s.closeErr(err)
-			}
-
+			close(ch)
 			return
 		}
 
-		// run the message handler as a goroutine, we don't want
-		// to wait at all to start reading next message
-		go func(b []byte) {
-			var r streamResp
-			if err := json.Unmarshal(b, &r); err != nil {
-				s.errHandler(fmt.Errorf("failed reading socket response: %w\nRaw: %s", err, b))
+		s.logger.DebugContext(ctx, "payload sent", "raw", string(buf))
+		ch <- buf
+	}
+}
+
+func (s *WS) read(ctx context.Context) ([]byte, error) {
+	_, buf, err := s.ws.Read(ctx)
+	if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
+
+			s.Close(ctx)
+		case err == net.ErrClosed:
+			s.cancel()
+			s.errHandler(err)
+		default:
+			s.closeErr(err)
+		}
+
+		return nil, err
+	}
+
+	return buf, nil
+}
+
+func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
+	d := ctx.Done()
+	for {
+		var b []byte
+		select {
+		case <-d:
+			return
+		case b = <-ch:
+			if b == nil {
 				return
 			}
+		}
 
-			s.fm.pub(r.APIResponses)
-			for _, v := range r.Notify {
-				s.pongHandler(time.Time(v))
+		var r streamResp
+		if err := json.Unmarshal(b, &r); err != nil {
+			s.errHandler(fmt.Errorf("failed deserializing socket response: %w\nRaw: %s", err, b))
+			return
+		}
+
+		for _, v := range r.Data {
+			switch v.Service {
+			case serviceLeveloneEquities:
+				if s.equityHandler == nil {
+					s.logger.ErrorContext(s.connCtx, "handler is not defined", "service", v.Service)
+					continue
+				}
+
+				go handlerMaker(s.logger, v, s.errHandler, s.equityHandler)
+			case serviceLeveloneOptions:
+				if s.optionHandler == nil {
+					s.logger.ErrorContext(s.connCtx, "handler is not defined", "service", v.Service)
+					continue
+				}
+
+				go handlerMaker(s.logger, v, s.errHandler, s.optionHandler)
+			case serviceLeveloneFutures:
+				if s.futureHandler == nil {
+					s.logger.ErrorContext(s.connCtx, "handler is not defined", "service", v.Service)
+					continue
+				}
+
+				go handlerMaker(s.logger, v, s.errHandler, s.futureHandler)
+			case serviceLeveloneFuturesOptions:
+				if s.futureOptionHandler == nil {
+					s.logger.ErrorContext(s.connCtx, "handler is not defined", "service", v.Service)
+					continue
+				}
+
+				go handlerMaker(s.logger, v, s.errHandler, s.futureOptionHandler)
+			case serviceChartEquity:
+				if s.chartEquityHandler == nil {
+					s.logger.ErrorContext(s.connCtx, "handler is not defined", "service", v.Service)
+					continue
+				}
+
+				go handlerMaker(s.logger, v, s.errHandler, s.chartEquityHandler)
+			case serviceChartFutures:
+				if s.chartFutureHandler == nil {
+					s.logger.ErrorContext(s.connCtx, "handler is not defined", "service", v.Service)
+					continue
+				}
+
+				go handlerMaker(s.logger, v, s.errHandler, s.chartFutureHandler)
+			default:
+				s.logger.ErrorContext(s.connCtx, "unknown service type received", "raw", v)
+				go s.errHandler(fmt.Errorf("you subscribed for data for a service that is unimplemented potentially: %s\ndata: %+v", v.Service, v))
 			}
-		}(buf)
+		}
+
+		s.fm.pub(r.APIResponses)
+
+		for _, v := range r.Notify {
+			s.pongHandler(time.Time(v))
+		}
 	}
+}
+
+func handlerMaker[X any](logger *slog.Logger, data dataResp, errHandler func(error), handler func(X)) {
+	var x X
+	if err := json.Unmarshal(data.Content, &x); err != nil {
+		logger.Error("failed unmarshal into correct response type", "raw", data)
+		errHandler(err)
+		return
+	}
+
+	handler(x)
 }

@@ -3,6 +3,8 @@ package td
 import (
 	"context"
 	"strings"
+
+	"github.com/coder/websocket"
 )
 
 //go:generate enumer -type ConnStatus -text
@@ -20,9 +22,9 @@ type LoginResp struct {
 }
 
 // Login. Client channel and functionID can be found from user preferences endpoint
-func (s *WS) Login(ctx context.Context, clientChannel, functionID string) (loginResp LoginResp, err error) {
+func (s *WS) login(ctx context.Context, accessToken, clientChannel, functionID string) (loginResp LoginResp, err error) {
 	req, err := s.do(ctx, serviceAdmin, commandLogin, map[string]any{
-		"Authorization":          s.creds.AccessToken,
+		"Authorization":          accessToken,
 		"SchwabClientChannel":    clientChannel,
 		"SchwabClientFunctionId": functionID,
 	})
@@ -36,7 +38,7 @@ func (s *WS) Login(ctx context.Context, clientChannel, functionID string) (login
 		return loginResp, err
 	}
 
-	a, err := resp.Content.wsResp()
+	a, err := resp.wsResp()
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed parsing stream response as WSResp", "err", err, "raw", string(resp.Content))
 		return loginResp, err
@@ -68,7 +70,15 @@ func (s *WS) Login(ctx context.Context, clientChannel, functionID string) (login
 	return loginResp, nil
 }
 
-func (s *WS) Logout(ctx context.Context) error {
+// Close will attempt a logout, and finally close the websocket connection regardless if
+// the logout succeeded
+func (s *WS) Close(ctx context.Context) error {
+	defer func() {
+		if closeErr := s.ws.Close(websocket.StatusNormalClosure, "user initiated logout/close"); closeErr != nil {
+			s.logger.ErrorContext(ctx, "got error attempting socket close", "err", closeErr)
+		}
+	}()
+
 	req, err := s.do(ctx, serviceAdmin, commandLogout, nil)
 	if err != nil {
 		return err
@@ -79,7 +89,7 @@ func (s *WS) Logout(ctx context.Context) error {
 		return err
 	}
 
-	a, err := resp.Content.wsResp()
+	a, err := resp.wsResp()
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed converting payload to ws resp", "err", err, "raw", resp.Content)
 		return err

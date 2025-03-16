@@ -24,3 +24,9 @@ s, err := td.NewSocket(
 	td.WithLogger(/* logger configured for slog, if desired */),
 )
 ```
+
+## TODOs
+
+- Figure out the absymal documentation on these things:
+  - FutureTradingHours field
+  - FuturePriceFormat

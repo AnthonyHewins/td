@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:generate enumer -type service -json -trimprefix service -transform snaker-upper
+//go:generate enumer -type service -json -trimprefix service -transform snake-upper
 type service byte
 
 const (
@@ -41,10 +41,6 @@ const (
 	commandLogout
 )
 
-type requests struct {
-	Requests []streamRequest `json:"requests"`
-}
-
 type streamRequest struct {
 	ID                     requestID `json:"requestid"`
 	Service                service   `json:"service"`
@@ -61,19 +57,28 @@ type streamResp struct {
 }
 
 type dataResp struct {
-	Service   service `json:"service"`
-	Timestamp epoch   `json:"requestid"`
-	Command   command `json:"command"`
-	Content   content `json:"content"`
+	Service   service         `json:"service"`
+	Timestamp epoch           `json:"requestid"`
+	Command   command         `json:"command"`
+	Content   json.RawMessage `json:"content"`
 }
 
 type apiResp struct {
-	Service              service   `json:"service"`
-	Command              command   `json:"command"`
-	RequestID            requestID `json:"requestid"`
-	SchwabClientCorrelId uuid.UUID `json:"SchwabClientCorrelId"`
-	Timestamp            epoch     `json:"timestamp"`
-	Content              content   `json:"content"`
+	Service              service         `json:"service"`
+	Command              command         `json:"command"`
+	RequestID            requestID       `json:"requestid"`
+	SchwabClientCorrelId uuid.UUID       `json:"SchwabClientCorrelId"`
+	Timestamp            epoch           `json:"timestamp"`
+	Content              json.RawMessage `json:"content"`
+}
+
+func (a *apiResp) wsResp() (*WSResp, error) {
+	var x WSResp
+	if err := json.Unmarshal(a.Content, &x); err != nil {
+		return nil, err
+	}
+
+	return &x, nil
 }
 
 type epoch time.Time
@@ -86,15 +91,4 @@ func (e *epoch) UnmarshalJSON(b []byte) error {
 
 	*e = epoch(time.UnixMilli(x))
 	return nil
-}
-
-type content json.RawMessage
-
-func (c content) wsResp() (*WSResp, error) {
-	var a WSResp
-	if err := json.Unmarshal(c, &a); err != nil {
-		return nil, err
-	}
-
-	return &a, nil
 }

@@ -59,11 +59,12 @@ type Quote struct {
 
 func (c *HTTPClient) GetQuotes(ctx context.Context, symbol string) (map[string]Quote, error) {
 	if symbol == "" {
+		c.logger.ErrorContext(ctx, "missing symbol to get quote")
 		return nil, ErrMissingSymbol
 	}
 
 	var q map[string]Quote
-	err := c.do(ctx, http.MethodGet, fmt.Sprintf("market/quotes?symbol=%s", symbol), nil, &q)
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/market/quotes?symbol=%s", symbol), nil, &q)
 	if err != nil {
 		return nil, err
 	}

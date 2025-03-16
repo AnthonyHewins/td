@@ -14,7 +14,7 @@ import (
 
 const (
 	DefaultWSTimeout = 5 * time.Second
-	DefaultPingEvery = DefaultWSTimeout
+	DefaultPingEvery = 3 * time.Second
 )
 
 var (
@@ -30,22 +30,25 @@ type WS struct {
 
 	errHandler func(error)
 
+	equityHandler       func(*Equity)
+	futureHandler       func(*Future)
+	optionHandler       func(*Option)
+	futureOptionHandler func(*FutureOption)
+	chartEquityHandler  func(*ChartEquity)
+	chartFutureHandler  func(*ChartFuture)
+
 	pingEvery   time.Duration
 	pongHandler func(time.Time)
 
 	logger *slog.Logger
 	fm     fanoutMutex
 	ws     *websocket.Conn
-	creds  WSCreds
-}
 
-// Credentials for every socket request
-// You get these via the User preferences endpoint
-type WSCreds struct {
-	CustomerID string
-	SessionID  uuid.UUID
+	ConnStatus ConnStatus
+	Server     string
 
-	*Token
+	customerID string
+	correlID   uuid.UUID
 }
 
 type WSOpt func(w *WS)
@@ -73,23 +76,52 @@ func WithLogger(l slog.Handler) WSOpt {
 	return func(w *WS) { w.logger = slog.New(l) }
 }
 
-func NewSocket(ctx context.Context, uri string, opts *websocket.DialOptions, userCreds WSCreds, wsOpts ...WSOpt) (*WS, error) {
-	if uri == "" {
-		return nil, ErrMissingWSSUrl
+// Handler that will pass equity data back to this function in a goroutine for processing
+func WithEquityHandler(fn func(*Equity)) WSOpt { return func(w *WS) { w.equityHandler = fn } }
+
+// Handler that will pass future data back to this function in a goroutine for processing
+func WithFutureHandler(fn func(*Future)) WSOpt { return func(w *WS) { w.futureHandler = fn } }
+
+// Handler that will pass option data back to this function in a goroutine for processing
+func WithOptionHandler(fn func(*Option)) WSOpt { return func(w *WS) { w.optionHandler = fn } }
+
+// Handler that will pass futures option data back to this function in a goroutine for processing
+func WithFutureOptionHandler(fn func(*FutureOption)) WSOpt {
+	return func(w *WS) { w.futureOptionHandler = fn }
+}
+
+// Handler that will pass chart equity data back to this function in a goroutine for processing
+func WithChartEquityHandler(fn func(*ChartEquity)) WSOpt {
+	return func(w *WS) { w.chartEquityHandler = fn }
+}
+
+// Handler that will pass chart futures data back to this function in a goroutine for processing
+func WithChartFutureHandler(fn func(*ChartFuture)) WSOpt {
+	return func(w *WS) { w.chartFutureHandler = fn }
+}
+
+// Every time the server returns a pong, you can choose to handle it. By default,
+// this is a no-op
+func WithPongHandler(fn func(time.Time)) WSOpt { return func(w *WS) { w.pongHandler = fn } }
+
+func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, refreshToken string, wsOpts ...WSOpt) (*WS, error) {
+	if h == nil {
+		return nil, fmt.Errorf("must supply HTTP client, needed for authentication")
 	}
 
-	if userCreds.CustomerID == "" || userCreds.SessionID == uuid.Nil {
-		return nil, ErrMissingUserCreds
+	t, err := h.Authenticate(ctx, refreshToken)
+	if err != nil {
+		return nil, err
 	}
 
 	connCtx, cancel := context.WithCancel(ctx)
-
 	s := &WS{
-		logger:  slog.New(slog.DiscardHandler),
-		fm:      fanoutMutex{timeout: DefaultWSTimeout},
-		creds:   userCreds,
-		connCtx: connCtx,
-		cancel:  cancel,
+		logger:      slog.New(slog.DiscardHandler),
+		fm:          fanoutMutex{timeout: DefaultWSTimeout},
+		pingEvery:   DefaultPingEvery,
+		connCtx:     connCtx,
+		cancel:      cancel,
+		pongHandler: func(t time.Time) {},
 	}
 
 	for _, v := range wsOpts {
@@ -97,33 +129,71 @@ func NewSocket(ctx context.Context, uri string, opts *websocket.DialOptions, use
 	}
 
 	if s.errHandler == nil {
-		s.errHandler = func(err error) { s.logger.Error("error received from keepalive", "keepalive", true, "err", err) }
+		s.errHandler = func(err error) {
+			s.logger.Error("error received in keepalive async loop", "keepalive", true, "err", err)
+		}
 	}
 
-	var err error
-	s.ws, _, err = websocket.Dial(ctx, uri, opts)
+	s.logger.InfoContext(ctx, "fetching user preferences")
+	prefs, err := h.GetUserPreference(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed fetching user prefs", "err", err)
+		return nil, err
+	}
+
+	if len(prefs.StreamerInfo) == 0 {
+		s.logger.ErrorContext(ctx, "user prefs is blank. This is needed to connect to the socket URL", "resp", prefs)
+		return nil, fmt.Errorf("can't connect: no stream info returned. Resp: %+v", prefs)
+	}
+
+	i := prefs.StreamerInfo[0]
+	s.customerID = i.SchwabClientCustomerId
+	s.correlID = i.SchwabClientCorrelId
+
+	s.ws, _, err = websocket.Dial(ctx, i.StreamerSocketURL, opts)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed dialing websocket", "err", err, "options", opts)
+		return nil, err
+	}
+
+	go s.keepalive(ctx)
+	defer func() {
+		if err != nil {
+			cancel()
+			s.ws.Close(websocket.StatusInternalError, "failed setup of client")
+		}
+	}()
+
+	resp, err := s.login(ctx, t.AccessToken, i.SchwabClientChannel, i.SchwabClientFunctionId)
 	if err != nil {
 		return nil, err
 	}
 
-	// {
-	// 	Service:                "ADMIN",
-	// 	Command:                "LOGIN",
-	// 	Requestid:              0,
-	// 	SchwabClientCustomerId: userPrincipal.StreamerInfo[0].SchwabClientCustomerId,
-	// 	SchwabClientCorrelId:   userPrincipal.StreamerInfo[0].SchwabClientCorrelId,
-	// 	Parameters: StreamAuthParams{
-	// 		Authorization:          accessToken,
-	// 		SchwabClientChannel:    userPrincipal.StreamerInfo[0].SchwabClientChannel,
-	// 		SchwabClientFunctionId: userPrincipal.StreamerInfo[0].SchwabClientFunctionId,
-	// 	},
-	// }
+	s.logger.InfoContext(ctx, "login successful", "type", resp.ConnStatus, "server", resp.Server)
+	s.ConnStatus = resp.ConnStatus
+	s.Server = resp.Server
+
 	return s, nil
 }
 
-// Close closes the underlying websocket connection.
-func (s *WS) Close() error {
-	return s.ws.Close(websocket.StatusNormalClosure, "user initiated close")
+func (s *WS) genericReq(ctx context.Context, svc service, cmd command, params any) (*WSResp, error) {
+	req, err := s.do(ctx, svc, cmd, params)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.wait(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	w, err := resp.wsResp()
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed unmarshal of subscribe chart equity response", "err", err, "raw", string(resp.Content))
+		return nil, err
+	}
+
+	return w, nil
 }
 
 func (s *WS) do(ctx context.Context, svc service, cmd command, params any) (*socketReq, error) {
@@ -133,8 +203,8 @@ func (s *WS) do(ctx context.Context, svc service, cmd command, params any) (*soc
 		ID:                     r.id,
 		Service:                svc,
 		Command:                cmd,
-		SchwabClientCustomerId: s.creds.CustomerID,
-		SchwabClientCorrelId:   s.creds.SessionID,
+		SchwabClientCustomerId: s.customerID,
+		SchwabClientCorrelId:   s.correlID,
 		Parameters:             params,
 	}
 
@@ -153,133 +223,3 @@ func (s *WS) do(ctx context.Context, svc service, cmd command, params any) (*soc
 	l.DebugContext(ctx, "wrote payload")
 	return r, nil
 }
-
-/*
-// SendCommand serializes and sends a Command struct to TD Ameritrade.
-// It is a wrapper around SendText.
-func (s *WS) SendCommand(command Command) error {
-	commandBytes, err := json.Marshal(command)
-	if err != nil {
-		return err
-	}
-	return s.SendText(commandBytes)
-}
-
-// NewUnauthenticatedStreamingClient returns an unauthenticated streaming client that has a connection to the TD Ameritrade websocket.
-// You can get an authenticated streaming client with NewAuthenticatedStreamingClient.
-// To authenticate manually, send a JSON serialized StreamAuthCommand message with the StreamingClient's Authenticate method.
-// You'll need to Close a streaming client to free up the underlying resources.
-func NewUnauthenticatedStreamingClient(userPrincipal *UserPrincipal) (*WS, error) {
-	host := strings.TrimPrefix(userPrincipal.StreamerInfo[0].StreamerSocketURL, "wss://")
-	host = strings.TrimSuffix(host, "/ws")
-	streamURL := url.URL{
-		Scheme: "wss",
-		Host:   host,
-		Path:   "/ws",
-	}
-
-	conn, _, err := websocket.DefaultDialer.Dial(streamURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	streamingClient := &WS{
-		ws:       conn,
-		messages: make(chan []byte),
-		errors:   make(chan error),
-	}
-	streamingClient.ws.SetCloseHandler(CloseHandler)
-	streamingClient.ws.SetPingHandler(PingHandler)
-	streamingClient.ws.SetPongHandler(PongHandler)
-
-	// Pass messages and errors down the respective channels.
-	go func() {
-		for {
-			_, message, messageErr := streamingClient.ws.ReadMessage()
-			fmt.Println("Message Received: ", string(message))
-			if messageErr != nil {
-				// streamingClient.errors <- err
-				fmt.Println("Error Received: ", messageErr)
-				return
-			}
-
-			streamingClient.messages <- message
-		}
-	}()
-
-	return streamingClient, nil
-}
-
-func CloseHandler(code int, text string) error {
-	fmt.Println("Connection Closed: ", text, code)
-	return nil
-}
-
-func PingHandler(appData string) error {
-	fmt.Println("Connection Ping: ", appData)
-	return nil
-}
-
-func PongHandler(appData string) error {
-	fmt.Println("Connection Pong: ", appData)
-	return nil
-}
-
-func (s *WS) SendPing(reconnect chan bool) {
-	reconnected := false
-	for {
-		time.Sleep(time.Minute * 30)
-		fmt.Println(time.Now().String(), "Sending Ping")
-		if err := s.ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-			fmt.Println("Error Sending Ping: ", err)
-			if !reconnected {
-				fmt.Println("Attempting to reconnect")
-				reconnect <- true
-				reconnected = true
-			}
-		}
-	}
-}
-
-// NewAuthenticatedStreamingClient returns a client that will pull live updates for a TD Ameritrade account.
-// It sends an initial authentication message to TD Ameritrade and waits for a response before returning.
-// Use NewUnauthenticatedStreamingClient if you want to handle authentication yourself.
-// You'll need to Close a StreamingClient to free up the underlying resources.
-func NewAuthenticatedStreamingClient(userPrincipal *UserPrincipal, accessToken string) (*WS, error) {
-	streamingClient, err := NewUnauthenticatedStreamingClient(userPrincipal)
-	if err != nil {
-		return nil, err
-	}
-
-	authCmd, err := NewStreamAuthCommand(userPrincipal, accessToken)
-	if err != nil {
-		return nil, err
-	}
-
-	err = streamingClient.Authenticate(authCmd)
-	if err != nil {
-		return nil, err
-	}
-
-	// Wait on a response from TD Ameritrade.
-	select {
-	case message := <-streamingClient.messages:
-		var authResponse StreamAuthResponse
-		err = json.Unmarshal(message, &authResponse)
-		if err != nil {
-			return nil, err
-		}
-
-		// Response with a code 0 means authentication succeeded.
-		if authResponse.Response[0].Content.Code != 0 {
-			return nil, errors.New(authResponse.Response[0].Content.Msg)
-		}
-
-		return streamingClient, nil
-
-	case err := <-streamingClient.errors:
-		return nil, err
-	}
-
-}
-*/

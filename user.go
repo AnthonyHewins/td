@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -91,11 +93,11 @@ type Authorizations struct {
 }
 
 type StreamerInfo struct {
-	StreamerSocketURL      string `json:"streamerSocketUrl"`
-	SchwabClientCustomerId string `json:"schwabClientCustomerId"`
-	SchwabClientCorrelId   string `json:"schwabClientCorrelId"`
-	SchwabClientChannel    string `json:"schwabClientChannel"`
-	SchwabClientFunctionId string `json:"schwabClientFunctionId"`
+	StreamerSocketURL      string    `json:"streamerSocketUrl"`
+	SchwabClientCustomerId string    `json:"schwabClientCustomerId"`
+	SchwabClientCorrelId   uuid.UUID `json:"schwabClientCorrelId"`
+	SchwabClientChannel    string    `json:"schwabClientChannel"`
+	SchwabClientFunctionId string    `json:"schwabClientFunctionId"`
 }
 
 type QuoteDelays struct {
@@ -112,7 +114,7 @@ type QuoteDelays struct {
 // See https://developer.tdameritrade.com/user-principal/apis/get/accounts/%7BaccountId%7D/preferences-0
 func (s *HTTPClient) GetPreferences(ctx context.Context, accountID string) (*Preferences, error) {
 	preferences := new(Preferences)
-	err := s.do(ctx, http.MethodGet, fmt.Sprintf("accounts/%s/preferences", accountID), nil, preferences)
+	err := s.do(ctx, http.MethodGet, fmt.Sprintf("/accounts/%s/preferences", accountID), nil, preferences)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +133,7 @@ func (s *HTTPClient) GetStreamerSubscriptionKeys(ctx context.Context, accountIDs
 	err := s.do(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("userprincipals/streamersubscriptionkeys?accountIds=%s", strings.Join(accountIDs, ",")),
+		fmt.Sprintf("/userprincipals/streamersubscriptionkeys?accountIds=%s", strings.Join(accountIDs, ",")),
 		nil,
 		streamerSubscriptionKeys,
 	)
@@ -160,7 +162,7 @@ func (s *HTTPClient) GetUserPrincipals(ctx context.Context, fields ...UserPrinci
 	}
 
 	userPrincipal := new(UserPrincipal)
-	err := s.do(ctx, http.MethodGet, fmt.Sprintf("userprincipals%s", sb.String()), nil, userPrincipal)
+	err := s.do(ctx, http.MethodGet, fmt.Sprintf("/userPrincipals%s", sb.String()), nil, userPrincipal)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +173,7 @@ func (s *HTTPClient) GetUserPrincipals(ctx context.Context, fields ...UserPrinci
 // GetUserPreference returns User Preference details.
 func (s *HTTPClient) GetUserPreference(ctx context.Context) (*UserPrincipal, error) {
 	userPrincipal := new(UserPrincipal)
-	err := s.do(ctx, http.MethodGet, "userPreference", nil, userPrincipal)
+	err := s.do(ctx, http.MethodGet, "/userPreference", nil, userPrincipal)
 	if err != nil {
 		return nil, err
 	}
@@ -184,14 +186,16 @@ func (s *HTTPClient) GetUserPreference(ctx context.Context) (*UserPrincipal, err
 // See https://developer.tdameritrade.com/user-principal/apis/put/accounts/%7BaccountId%7D/preferences-0
 func (s *HTTPClient) UpdatePreferences(ctx context.Context, accountID string, newPreferences *Preferences) error {
 	if accountID == "" {
+		s.logger.ErrorContext(ctx, "missing account ID")
 		return ErrMissingAcctIDs
 	}
 
 	if newPreferences == nil {
+		s.logger.ErrorContext(ctx, "missing new preferences argument")
 		return fmt.Errorf("newPreferences is nil")
 	}
 
-	err := s.do(ctx, http.MethodPut, fmt.Sprintf("accounts/%s/preferences", accountID), newPreferences, nil)
+	err := s.do(ctx, http.MethodPut, fmt.Sprintf("/accounts/%s/preferences", accountID), newPreferences, nil)
 	if err != nil {
 		return err
 	}

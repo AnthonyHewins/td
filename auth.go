@@ -2,87 +2,53 @@ package td
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
-	"sync"
+	"errors"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
-// TD tokens expire in 7 days. Buffer that backward by 2 seconds
-const tokenExpiresIn = ((7 * 24) * time.Hour) - time.Second*2
+var ErrMissingRefresh = errors.New(`refresh token is currently required to authenticate.
+Spam schwab emails and tell them this is stupid and they should follow automated authentication`)
 
-type tokenManager struct {
-	mu sync.RWMutex
-	t  Token
-}
+// Force authentication to happen. The returned token is a copy of the internal one that will be
+// used for future requests. After calling this function there will be automatic refreshes until
+// eventually the refresh token expires. By this point you will need to follow the flow to get a new
+// one, which is unfortunately a manual process
+func (c *HTTPClient) Authenticate(ctx context.Context, refreshToken string) (oauth2.Token, error) {
+	conf := c.oauthConf
 
-type Token struct {
-	TokenType    string    `json:"token_type"`
-	Scope        string    `json:"scope"`
-	RefreshToken string    `json:"refresh_token"`
-	AccessToken  string    `json:"access_token"`
-	IdToken      string    `json:"id_token"`
-	Expires      time.Time `json:"expires"`
-}
+	l := c.logger.With(
+		"clientID", conf.ClientID,
+		"len(clientSecret)>0", len(conf.ClientSecret) > 0,
+		"authEndpoint", conf.Endpoint,
+		"redirectURL", conf.RedirectURL,
+	)
 
-func (t *Token) Expired() bool {
-	return time.Now().After(t.Expires)
-}
+	if refreshToken == "" {
+		l.ErrorContext(ctx, "missing refresh token as argument")
+		return oauth2.Token{}, ErrMissingRefresh
+	}
 
-type tokenResp struct {
-	ExpiresIn    int64  `json:"expires_in"`
-	TokenType    string `json:"token_type"`
-	Scope        string `json:"scope"`
-	RefreshToken string `json:"refresh_token"`
-	AccessToken  string `json:"access_token"`
-	IdToken      string `json:"id_token"`
-}
-
-func (c *HTTPClient) refresh(ctx context.Context) error {
-	c.tm.mu.Lock()
-	defer c.tm.mu.Unlock()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authURL, strings.NewReader(
-		url.Values{
-			"grant_type":    []string{"refresh_token"},
-			"refresh_token": []string{c.tm.t.RefreshToken},
-		}.Encode(),
-	))
+	tkn := &oauth2.Token{RefreshToken: refreshToken}
+	c.http = c.oauthConf.Client(ctx, tkn)
+	t, err := c.oauthConf.TokenSource(ctx, tkn).Token()
 	if err != nil {
-		return err
+		l.ErrorContext(ctx, "failed fetching token", "err", err)
+		return oauth2.Token{}, err
 	}
 
-	encodedCredentials := base64.StdEncoding.EncodeToString([]byte(c.key + ":" + c.secret))
-	req.Header.Set("Authorization", "Basic "+encodedCredentials)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	refreshTokenBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	expiration := t.Expiry
+	if expiration.IsZero() && t.ExpiresIn > 0 {
+		expiration = time.Now().Add(time.Second * time.Duration(t.ExpiresIn))
 	}
 
-	var t tokenResp
-	if err = json.Unmarshal(refreshTokenBytes, &t); err != nil {
-		return err
-	}
-
-	c.tm.t = Token{
-		TokenType:    t.TokenType,
-		Scope:        t.Scope,
-		RefreshToken: t.RefreshToken,
+	l.DebugContext(ctx, "token fetched", "expiry", expiration, "type", t.TokenType)
+	return oauth2.Token{
 		AccessToken:  t.AccessToken,
-		IdToken:      t.IdToken,
-		Expires:      time.Now().Add(tokenExpiresIn),
-	}
-	return nil
+		TokenType:    t.TokenType,
+		RefreshToken: t.RefreshToken,
+		Expiry:       expiration,
+		ExpiresIn:    t.ExpiresIn,
+	}, nil
 }

@@ -174,7 +174,7 @@ func (e *ExchangeID) UnmarshalJSON(b []byte) error {
 	}
 
 	switch x {
-	case 0:
+	case 0, '?':
 		*e = ExchangeIDUnspecified
 	case 'A':
 		*e = ExchangeIDAmex
@@ -562,7 +562,7 @@ func (e *EquityReq) MarshalJSON() ([]byte, error) {
 
 // This uses the SUBS command to subscribe to equities. Using this command, you reset your subscriptions to include only this
 // set of symbols and fields
-func (s *WS) SetEquitySubscription(ctx context.Context, subs *EquityReq) (*Equity, error) {
+func (s *WS) SetEquitySubscription(ctx context.Context, subs *EquityReq) (*WSResp, error) {
 	if len(subs.Fields) == 0 {
 		return nil, ErrMissingField
 	}
@@ -571,52 +571,32 @@ func (s *WS) SetEquitySubscription(ctx context.Context, subs *EquityReq) (*Equit
 		return nil, ErrMissingSymbol
 	}
 
-	return s.equityRequest(ctx, commandSubs, subs)
+	return s.genericReq(ctx, serviceLeveloneEquities, commandSubs, subs)
 }
 
 // This uses the ADD command to add additional symbols to the subscription list, if any exist.
 // If none exist, then this will create them. If you are creating subscriptions for the first time,
 // you will need to provide a value for subs.Fields, otherwise it's not required
-func (s *WS) AddEquitySubscription(ctx context.Context, subs *EquityReq) (*Equity, error) {
+func (s *WS) AddEquitySubscription(ctx context.Context, subs *EquityReq) (*WSResp, error) {
 	if len(subs.Symbols) == 0 {
 		return nil, ErrMissingSymbol
 	}
 
-	return s.equityRequest(ctx, commandAdd, subs)
+	return s.genericReq(ctx, serviceLeveloneEquities, commandAdd, subs)
 }
 
-func (s *WS) SetEquitySubscriptionView(ctx context.Context, fields ...EquityField) (*Equity, error) {
+func (s *WS) SetEquitySubscriptionView(ctx context.Context, fields ...EquityField) (*WSResp, error) {
 	if len(fields) == 0 {
 		return nil, ErrMissingField
 	}
 
-	return s.equityRequest(ctx, commandView, &EquityReq{Fields: fields})
+	return s.genericReq(ctx, serviceLeveloneEquities, commandView, &EquityReq{Fields: fields})
 }
 
-func (s *WS) UnsubEquitySubscription(ctx context.Context, symbols ...string) (*Equity, error) {
+func (s *WS) UnsubEquitySubscription(ctx context.Context, symbols ...string) (*WSResp, error) {
 	if len(symbols) == 0 {
 		return nil, ErrMissingSymbol
 	}
 
-	return s.equityRequest(ctx, commandUnsubs, &EquityReq{Symbols: symbols})
-}
-
-func (s *WS) equityRequest(ctx context.Context, cmd command, e *EquityReq) (*Equity, error) {
-	req, err := s.do(ctx, serviceLeveloneEquities, cmd, e)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := s.wait(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	var w Equity
-	if err := json.Unmarshal(resp.Content, &w); err != nil {
-		s.logger.ErrorContext(ctx, "failed unmarshal of subscribe equity response", "err", err, "raw", string(resp.Content))
-		return nil, err
-	}
-
-	return &w, nil
+	return s.genericReq(ctx, serviceLeveloneEquities, commandUnsubs, &EquityReq{Symbols: symbols})
 }

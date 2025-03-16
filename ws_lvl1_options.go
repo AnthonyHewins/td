@@ -518,7 +518,7 @@ func (o *Option) UnmarshalJSON(b []byte) error {
 
 // This uses the SUBS command to subscribe to equities. Using this command, you reset your subscriptions to include only this
 // set of symbols and fields
-func (s *WS) SetOptionSubscription(ctx context.Context, subs *OptionReq) (*Option, error) {
+func (s *WS) SetOptionSubscription(ctx context.Context, subs *OptionReq) (*WSResp, error) {
 	if len(subs.Fields) == 0 {
 		return nil, ErrMissingField
 	}
@@ -527,52 +527,32 @@ func (s *WS) SetOptionSubscription(ctx context.Context, subs *OptionReq) (*Optio
 		return nil, ErrMissingOptions
 	}
 
-	return s.optionRequest(ctx, commandSubs, subs)
+	return s.genericReq(ctx, serviceLeveloneOptions, commandSubs, subs)
 }
 
 // This uses the ADD command to add additional symbols to the subscription list, if any exist.
 // If none exist, then this will create them. If you are creating subscriptions for the first time,
 // you will need to provide a value for subs.Fields, otherwise it's not required
-func (s *WS) AddOptionSubscription(ctx context.Context, subs *OptionReq) (*Option, error) {
+func (s *WS) AddOptionSubscription(ctx context.Context, subs *OptionReq) (*WSResp, error) {
 	if len(subs.Options) == 0 {
 		return nil, ErrMissingOptions
 	}
 
-	return s.optionRequest(ctx, commandAdd, subs)
+	return s.genericReq(ctx, serviceLeveloneOptions, commandAdd, subs)
 }
 
-func (s *WS) SetOptionSubscriptionView(ctx context.Context, fields ...OptionField) (*Option, error) {
+func (s *WS) SetOptionSubscriptionView(ctx context.Context, fields ...OptionField) (*WSResp, error) {
 	if len(fields) == 0 {
 		return nil, ErrMissingField
 	}
 
-	return s.optionRequest(ctx, commandView, &OptionReq{Fields: fields})
+	return s.genericReq(ctx, serviceLeveloneOptions, commandView, &OptionReq{Fields: fields})
 }
 
-func (s *WS) UnsubOptionSubscription(ctx context.Context, ids ...OptionID) (*Option, error) {
+func (s *WS) UnsubOptionSubscription(ctx context.Context, ids ...OptionID) (*WSResp, error) {
 	if len(ids) == 0 {
 		return nil, ErrMissingOptions
 	}
 
-	return s.optionRequest(ctx, commandUnsubs, &OptionReq{Options: ids})
-}
-
-func (s *WS) optionRequest(ctx context.Context, cmd command, e *OptionReq) (*Option, error) {
-	req, err := s.do(ctx, serviceLeveloneEquities, cmd, e)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := s.wait(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	var w Option
-	if err := json.Unmarshal(resp.Content, &w); err != nil {
-		s.logger.ErrorContext(ctx, "failed unmarshal of subscribe equity response", "err", err, "raw", string(resp.Content))
-		return nil, err
-	}
-
-	return &w, nil
+	return s.genericReq(ctx, serviceLeveloneOptions, commandUnsubs, &OptionReq{Options: ids})
 }

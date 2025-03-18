@@ -17,11 +17,19 @@ var (
 	ErrForceShutdown = errors.New("shutdown frame received")
 )
 
-type heartbeat time.Time
+type notifyMsg struct {
+	heartbeat time.Time
+	service   service
+	timestamp epoch
+	resp      WSResp
+}
 
-func (h *heartbeat) UnmarshalJSON(b []byte) error {
+func (h *notifyMsg) UnmarshalJSON(b []byte) error {
 	type wrapper struct {
-		Heartbeat string `json:"heartbeat"`
+		Heartbeat string  `json:"heartbeat"`
+		Service   service `json:"service"`
+		Timestamp epoch   `json:"timestamp"`
+		Content   WSResp  `json:"content"`
 	}
 
 	var w wrapper
@@ -29,12 +37,21 @@ func (h *heartbeat) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	asInt, err := strconv.ParseUint(w.Heartbeat, 10, 64)
-	if err != nil {
-		return fmt.Errorf("heartbeat should be unix millis wrapped in a string, got %s", b)
+	if w.Heartbeat != "" {
+		asInt, err := strconv.ParseUint(w.Heartbeat, 10, 64)
+		if err != nil {
+			return fmt.Errorf("heartbeat should be unix millis wrapped in a string, got %s", b)
+		}
+
+		h.heartbeat = time.UnixMilli(int64(asInt))
+		return nil
 	}
 
-	*h = heartbeat(time.UnixMilli(int64(asInt)))
+	*h = notifyMsg{
+		service:   w.Service,
+		timestamp: w.Timestamp,
+		resp:      w.Content,
+	}
 	return nil
 }
 
@@ -178,7 +195,16 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 		s.fm.pub(r.APIResponses)
 
 		for _, v := range r.Notify {
-			s.pongHandler(time.Time(v))
+			if !v.heartbeat.IsZero() {
+				s.pongHandler(v.heartbeat)
+				continue
+			}
+
+			if v.resp.Code == 0 {
+				continue
+			}
+
+			s.errHandler(&v.resp)
 		}
 	}
 }

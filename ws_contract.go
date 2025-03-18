@@ -53,7 +53,7 @@ type streamRequest struct {
 type streamResp struct {
 	APIResponses []apiResp   `json:"response,omitempty"`
 	Data         []dataResp  `json:"data,omitempty"`
-	Notify       []heartbeat `json:"notify,omitempty"`
+	Notify       []notifyMsg `json:"notify,omitempty"`
 }
 
 type dataResp struct {

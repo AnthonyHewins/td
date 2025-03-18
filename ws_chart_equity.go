@@ -29,7 +29,7 @@ type ChartEquity struct {
 	HighPrice  float64   `json:"2"` // Highest price for the minute
 	LowPrice   float64   `json:"3"` // Chart's lowest price for the minute
 	ClosePrice float64   `json:"4"` // Closing price for the minute
-	Volume     int       `json:"5"` // Total volume for the minute
+	Volume     float64   `json:"5"` // Total volume for the minute
 	Sequence   int       `json:"6"` // Identifies the candle minute
 	Time       time.Time `json:"7"`
 	Day        int       `json:"8"`
@@ -42,7 +42,7 @@ func (c *ChartEquity) UnmarshalJSON(b []byte) error {
 		HighPrice  float64 `json:"2"` // Highest price for the minute
 		LowPrice   float64 `json:"3"` // Chart's lowest price for the minute
 		ClosePrice float64 `json:"4"` // Closing price for the minute
-		Volume     int     `json:"5"` // Total volume for the minute
+		Volume     float64 `json:"5"` // Total volume for the minute
 		Sequence   int     `json:"6"` // Identifies the candle minute
 		ChartTime  int64   `json:"7"` // long	Milliseconds since Epoch
 		ChartDay   int     `json:"8"` // int

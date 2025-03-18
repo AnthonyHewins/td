@@ -114,7 +114,7 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 			s.cancel()
 			s.errHandler(err)
 		default:
-			s.closeErr(err)
+			s.closeErr(fmt.Errorf("unknown error causing close (%w):\n%w", net.ErrClosed, err))
 		}
 
 		return nil, err

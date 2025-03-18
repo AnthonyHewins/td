@@ -67,15 +67,25 @@ type ChartFutureReq struct {
 
 func (f *ChartFutureReq) MarshalJSON() ([]byte, error) {
 	m := make(map[string]string, 2)
-	if len(f.Symbols) > 0 {
-		s := make([]string, len(f.Symbols))
+	if n := len(f.Symbols); n > 0 {
+		n--
+		var sb strings.Builder
 		for i, v := range f.Symbols {
-			if s[i] = v; v == "" {
-				return nil, fmt.Errorf("empty symbol at index %d", i)
+			if len(v) <= 1 {
+				return nil, fmt.Errorf("invalid symbol at index %d: %s. Must be length 2 or greater, with at least '/' in symbol", i, v)
+			}
+
+			if []rune(v)[0] != '/' {
+				return nil, fmt.Errorf("invalid symbol at index %d: symbol must start with '/': %s", i, v)
+			}
+
+			sb.WriteString(v)
+			if n-1 != i {
+				sb.WriteRune(',')
 			}
 		}
 
-		m["keys"] = strings.Join(s, ",")
+		m["keys"] = sb.String()
 	}
 
 	if len(f.Fields) > 0 {

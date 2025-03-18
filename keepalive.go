@@ -210,12 +210,14 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 }
 
 func handlerMaker[X any](logger *slog.Logger, data dataResp, errHandler func(error), handler func(X)) {
-	var x X
+	var x []X
 	if err := json.Unmarshal(data.Content, &x); err != nil {
 		logger.Error("failed unmarshal into correct response type", "raw", data)
 		errHandler(err)
 		return
 	}
 
-	handler(x)
+	for _, j := range x {
+		handler(j)
+	}
 }

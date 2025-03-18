@@ -58,7 +58,7 @@ type streamResp struct {
 
 type dataResp struct {
 	Service   service         `json:"service"`
-	Timestamp epoch           `json:"requestid"`
+	Timestamp epoch           `json:"timestamp"`
 	Command   command         `json:"command"`
 	Content   json.RawMessage `json:"content"`
 }

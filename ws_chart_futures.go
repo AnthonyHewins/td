@@ -33,7 +33,8 @@ type ChartFuture struct {
 
 func (c *ChartFuture) UnmarshalJSON(b []byte) error {
 	type chartFuture struct {
-		Symbol     string  `json:"0"` // Ticker symbol in upper case.	N/A	N/A
+		Sequence   int     `json:"seq"`
+		Symbol     string  `json:"key"` // Ticker symbol in upper case.	N/A	N/A
 		Time       int64   `json:"1"`
 		OpenPrice  float64 `json:"2"` // double	Opening price for the minute	Yes	Yes
 		HighPrice  float64 `json:"3"` // double	Highest price for the minute	Yes	Yes

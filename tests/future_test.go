@@ -6,13 +6,13 @@ import (
 	"github.com/AnthonyHewins/td"
 )
 
-func TestEquitySub(t *testing.T) {
+func TestChartFutureSub(t *testing.T) {
 	ctx, cancel := c.ctx()
 	defer cancel()
 
-	resp, err := c.SetEquitySubscription(ctx, &td.EquityReq{
-		Symbols: []string{"AAPL"},
-		Fields:  []td.EquityField{td.EquityFieldHighPrice},
+	resp, err := c.AddChartFutureSubscription(ctx, &td.ChartFutureReq{
+		Symbols: []string{"/ESQ25"},
+		Fields:  td.ChartFutureFieldValues(),
 	})
 
 	if err != nil {
@@ -20,10 +20,11 @@ func TestEquitySub(t *testing.T) {
 		return
 	}
 
-	if resp.Msg == "SUBS command succeeded" {
+	if resp.Msg == "ADD command succeeded" {
 		_, err := c.UnsubEquitySubscription(ctx, "AAPL")
 		if err != nil {
 			t.Errorf("failed unsubbing from AAPL subscription, but was able to sub: %s", err)
 		}
 	}
+	t.Error("asd")
 }

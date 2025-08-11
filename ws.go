@@ -18,8 +18,9 @@ const (
 )
 
 var (
-	ErrMissingWSSUrl    = errors.New("received empty string for websocket connection URL")
-	ErrMissingUserCreds = errors.New("missing user credentials for socket login, one or more values empty/zero value")
+	ErrMissingHTTPClient = errors.New("must supply HTTP client, needed for authentication")
+	ErrMissingWSSUrl     = errors.New("received empty string for websocket connection URL")
+	ErrMissingUserCreds  = errors.New("missing user credentials for socket login, one or more values empty/zero value")
 )
 
 // WS provides real time updates from TD Ameritrade's streaming API.
@@ -106,7 +107,7 @@ func WithPongHandler(fn func(time.Time)) WSOpt { return func(w *WS) { w.pongHand
 
 func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, refreshToken string, wsOpts ...WSOpt) (*WS, error) {
 	if h == nil {
-		return nil, fmt.Errorf("must supply HTTP client, needed for authentication")
+		return nil, ErrMissingHTTPClient
 	}
 
 	t, err := h.Authenticate(ctx, refreshToken)

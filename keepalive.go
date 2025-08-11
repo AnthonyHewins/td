@@ -96,7 +96,7 @@ func (s *WS) keepalive(ctx context.Context) {
 			return
 		}
 
-		s.logger.DebugContext(ctx, "payload sent", "raw", string(buf))
+		s.logger.DebugContext(ctx, "payload received", "raw", string(buf))
 		ch <- buf
 	}
 }

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	AuthUrl = "https://api.schwabapi.com/v1/oauth/token"
-	ProdURL = "https://api.schwabapi.com/trader/v1"
+	AuthUrl       = "https://api.schwabapi.com/v1/oauth/token"
+	ProdURL       = "https://api.schwabapi.com/trader/v1"
+	ProdMarketURL = "https://api.schwabapi.com/marketdata/v1"
 )
 
 // HTTP client is the client for http requests via schwab.
@@ -35,6 +36,15 @@ type HTTPClientOpt func(c *HTTPClient)
 // Give an already valid access token to the client
 // to avoid fetching one
 func WithHTTPAccessToken(s string) HTTPClientOpt { return func(c *HTTPClient) { c.token = s } }
+
+func WithHTTPRefreshToken(ctx context.Context, s string) HTTPClientOpt {
+	return func(c *HTTPClient) {
+		_, err := c.Authenticate(ctx, s)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
 
 func WithClientLogger(l slog.Handler) HTTPClientOpt {
 	if l == nil {
@@ -119,7 +129,6 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body, target a
 		return err
 	}
 
-	req.Header.Add("Authorization", "Bearer "+c.token)
 	if toSend != nil {
 		req.Header.Add("Content-Type", "application/json")
 	}

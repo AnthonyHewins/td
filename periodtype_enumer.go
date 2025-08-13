@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-const _PeriodTypeName = "historyperiodunspecifiedhistoryperioddayhistoryperiodmonthhistoryperiodyearhistoryperiodytd"
+const _PeriodTypeName = "unspecifieddaymonthyearytd"
 
-var _PeriodTypeIndex = [...]uint8{0, 24, 40, 58, 75, 91}
+var _PeriodTypeIndex = [...]uint8{0, 11, 14, 19, 23, 26}
 
-const _PeriodTypeLowerName = "historyperiodunspecifiedhistoryperioddayhistoryperiodmonthhistoryperiodyearhistoryperiodytd"
+const _PeriodTypeLowerName = "unspecifieddaymonthyearytd"
 
 func (i PeriodType) String() string {
 	if i >= PeriodType(len(_PeriodTypeIndex)-1) {
@@ -25,34 +25,34 @@ func (i PeriodType) String() string {
 // Re-run the stringer command to generate them again.
 func _PeriodTypeNoOp() {
 	var x [1]struct{}
-	_ = x[HistoryPeriodUnspecified-(0)]
-	_ = x[HistoryPeriodDay-(1)]
-	_ = x[HistoryPeriodMonth-(2)]
-	_ = x[HistoryPeriodYear-(3)]
-	_ = x[HistoryPeriodYTD-(4)]
+	_ = x[PeriodTypeUnspecified-(0)]
+	_ = x[PeriodTypeDay-(1)]
+	_ = x[PeriodTypeMonth-(2)]
+	_ = x[PeriodTypeYear-(3)]
+	_ = x[PeriodTypeYTD-(4)]
 }
 
-var _PeriodTypeValues = []PeriodType{HistoryPeriodUnspecified, HistoryPeriodDay, HistoryPeriodMonth, HistoryPeriodYear, HistoryPeriodYTD}
+var _PeriodTypeValues = []PeriodType{PeriodTypeUnspecified, PeriodTypeDay, PeriodTypeMonth, PeriodTypeYear, PeriodTypeYTD}
 
 var _PeriodTypeNameToValueMap = map[string]PeriodType{
-	_PeriodTypeName[0:24]:       HistoryPeriodUnspecified,
-	_PeriodTypeLowerName[0:24]:  HistoryPeriodUnspecified,
-	_PeriodTypeName[24:40]:      HistoryPeriodDay,
-	_PeriodTypeLowerName[24:40]: HistoryPeriodDay,
-	_PeriodTypeName[40:58]:      HistoryPeriodMonth,
-	_PeriodTypeLowerName[40:58]: HistoryPeriodMonth,
-	_PeriodTypeName[58:75]:      HistoryPeriodYear,
-	_PeriodTypeLowerName[58:75]: HistoryPeriodYear,
-	_PeriodTypeName[75:91]:      HistoryPeriodYTD,
-	_PeriodTypeLowerName[75:91]: HistoryPeriodYTD,
+	_PeriodTypeName[0:11]:       PeriodTypeUnspecified,
+	_PeriodTypeLowerName[0:11]:  PeriodTypeUnspecified,
+	_PeriodTypeName[11:14]:      PeriodTypeDay,
+	_PeriodTypeLowerName[11:14]: PeriodTypeDay,
+	_PeriodTypeName[14:19]:      PeriodTypeMonth,
+	_PeriodTypeLowerName[14:19]: PeriodTypeMonth,
+	_PeriodTypeName[19:23]:      PeriodTypeYear,
+	_PeriodTypeLowerName[19:23]: PeriodTypeYear,
+	_PeriodTypeName[23:26]:      PeriodTypeYTD,
+	_PeriodTypeLowerName[23:26]: PeriodTypeYTD,
 }
 
 var _PeriodTypeNames = []string{
-	_PeriodTypeName[0:24],
-	_PeriodTypeName[24:40],
-	_PeriodTypeName[40:58],
-	_PeriodTypeName[58:75],
-	_PeriodTypeName[75:91],
+	_PeriodTypeName[0:11],
+	_PeriodTypeName[11:14],
+	_PeriodTypeName[14:19],
+	_PeriodTypeName[19:23],
+	_PeriodTypeName[23:26],
 }
 
 // PeriodTypeString retrieves an enum value from the enum constants string name.

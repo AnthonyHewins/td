@@ -2,7 +2,6 @@ package td
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -23,11 +22,11 @@ var (
 type PeriodType byte
 
 const (
-	HistoryPeriodUnspecified PeriodType = iota
-	HistoryPeriodDay
-	HistoryPeriodMonth
-	HistoryPeriodYear
-	HistoryPeriodYTD
+	PeriodTypeUnspecified PeriodType = iota
+	PeriodTypeDay
+	PeriodTypeMonth
+	PeriodTypeYear
+	PeriodTypeYTD
 )
 
 //go:generate enumer -type FrequencyType -json -trimprefix FrequencyType -transform lower
@@ -56,7 +55,7 @@ type PriceHistoryReq struct {
 
 func (r *PriceHistoryReq) validate() error {
 	switch {
-	case r.Period != 0 && r.PeriodType == HistoryPeriodUnspecified:
+	case r.Period != 0 && r.PeriodType == PeriodTypeUnspecified:
 		return ErrMissingPeriodType
 	case r.Frequency != 0 && r.FrequencyType == FrequencyTypeUnspecified:
 		return ErrMissingFrequencyType
@@ -65,8 +64,16 @@ func (r *PriceHistoryReq) validate() error {
 	}
 }
 
-func (p *PriceHistoryReq) MarshalJSON() ([]byte, error) {
-	type req struct {
+func (p *PriceHistoryReq) Encode(symbol string) (string, error) {
+	epoch := func(t time.Time) int64 {
+		if t.IsZero() {
+			return 0
+		}
+
+		return t.UnixMilli()
+	}
+
+	req := struct {
 		PeriodType            PeriodType    `url:"periodType,omitempty"`
 		Period                int           `url:"period,omitempty"`
 		FrequencyType         FrequencyType `url:"frequencyType,omitempty"`
@@ -74,17 +81,7 @@ func (p *PriceHistoryReq) MarshalJSON() ([]byte, error) {
 		EndDate               int64         `url:"endDate,omitempty"`
 		StartDate             int64         `url:"startDate,omitempty"`
 		NeedExtendedHoursData bool          `url:"needExtendedHoursData"`
-	}
-
-	epoch := func(t time.Time) int64 {
-		if t.IsZero() {
-			return 0
-		}
-
-		return t.Round(time.Millisecond).UnixNano() / 1e6
-	}
-
-	return json.Marshal(req{
+	}{
 		PeriodType:            p.PeriodType,
 		Period:                p.Period,
 		FrequencyType:         p.FrequencyType,
@@ -92,7 +89,15 @@ func (p *PriceHistoryReq) MarshalJSON() ([]byte, error) {
 		StartDate:             epoch(p.Start),
 		EndDate:               epoch(p.End),
 		NeedExtendedHoursData: p.NeedExtendedHoursData,
-	})
+	}
+
+	q, err := query.Values(req)
+	q.Set("symbol", symbol)
+	if err != nil {
+		return "", err
+	}
+
+	return q.Encode(), nil
 }
 
 type Candle struct {
@@ -116,11 +121,10 @@ func (c *HTTPClient) PriceHistory(ctx context.Context, symbol string, req *Price
 		return nil, err
 	}
 
-	q, err := query.Values(req)
+	encode, err := req.Encode(symbol)
 	if err != nil {
 		return nil, err
 	}
-	q.Set("symbol", symbol)
 
 	type pricehistory struct {
 		Symbol  string   `json:"symbol"`
@@ -129,7 +133,9 @@ func (c *HTTPClient) PriceHistory(ctx context.Context, symbol string, req *Price
 	}
 
 	priceHistory := new(pricehistory)
-	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/market/v1/pricehistory?%s", q.Encode()), nil, priceHistory)
+	u := fmt.Sprintf("/pricehistory?%s", encode)
+
+	err = c.do(ctx, http.MethodGet, u, nil, priceHistory)
 	if err != nil {
 		return nil, err
 	}

@@ -101,14 +101,19 @@ func newController(ctx context.Context) (*controller, error) {
 		fmt.Println("failed reading token from cache:", err)
 	}
 
-	hc := td.New(
+	hc, err := td.New(
+		ctx,
 		td.ProdURL,
 		td.AuthUrl,
 		conf.Key,
 		conf.Secret,
+		t.RefreshToken,
 		td.WithClientLogger(logger),
 		td.WithHTTPAccessToken(t.AccessToken),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	if t.AccessToken == "" {
 		t, err = hc.Authenticate(ctx, conf.RefreshToken)
@@ -145,7 +150,6 @@ func newController(ctx context.Context) (*controller, error) {
 		td.WithChartEquityHandler(makeHandler(ctx, c.chartEquityChan)),
 		td.WithChartFutureHandler(makeHandler(ctx, c.futureChartChan)),
 	)
-
 	if err != nil {
 		return nil, err
 	}

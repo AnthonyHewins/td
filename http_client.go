@@ -37,15 +37,6 @@ type HTTPClientOpt func(c *HTTPClient)
 // to avoid fetching one
 func WithHTTPAccessToken(s string) HTTPClientOpt { return func(c *HTTPClient) { c.token = s } }
 
-func WithHTTPRefreshToken(ctx context.Context, s string) HTTPClientOpt {
-	return func(c *HTTPClient) {
-		_, err := c.Authenticate(ctx, s)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
 func WithClientLogger(l slog.Handler) HTTPClientOpt {
 	if l == nil {
 		l = slog.DiscardHandler
@@ -54,7 +45,7 @@ func WithClientLogger(l slog.Handler) HTTPClientOpt {
 	return func(c *HTTPClient) { c.logger = slog.New(l) }
 }
 
-func New(baseURL, authURL, key, secret string, opts ...HTTPClientOpt) *HTTPClient {
+func New(ctx context.Context, baseURL, authURL, key, secret, refreshToken string, opts ...HTTPClientOpt) (*HTTPClient, error) {
 	c := &HTTPClient{
 		http:    http.DefaultClient,
 		logger:  slog.New(slog.DiscardHandler),
@@ -71,7 +62,9 @@ func New(baseURL, authURL, key, secret string, opts ...HTTPClientOpt) *HTTPClien
 		v(c)
 	}
 
-	return c
+	_, err := c.Authenticate(ctx, refreshToken)
+
+	return c, err
 }
 
 type HTTPErr struct {

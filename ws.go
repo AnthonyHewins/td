@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/coder/websocket"
@@ -13,23 +14,29 @@ import (
 )
 
 const (
-	DefaultWSTimeout = 5 * time.Second
-	DefaultPingEvery = 3 * time.Second
+	DefaultWSTimeout               = 5 * time.Second
+	DefaultPingEvery               = 3 * time.Second
+	DefaultReconnectAttempts uint8 = 10
 )
 
 var (
-	ErrMissingHTTPClient = errors.New("must supply HTTP client, needed for authentication")
-	ErrMissingWSSUrl     = errors.New("received empty string for websocket connection URL")
-	ErrMissingUserCreds  = errors.New("missing user credentials for socket login, one or more values empty/zero value")
+	ErrMissingHTTPClient   = errors.New("must supply HTTP client, needed for authentication")
+	ErrMissingRefreshToken = errors.New("must supply refresh token")
+	ErrMissingWSSUrl       = errors.New("received empty string for websocket connection URL")
+	ErrMissingUserCreds    = errors.New("missing user credentials for socket login, one or more values empty/zero value")
+	ErrReconnectExhausted  = errors.New("exhausted reconnect attempts")
 )
 
 // WS provides real time updates from TD Ameritrade's streaming API.
 // See https://developer.tdameritrade.com/content/streaming-data for more information.
 type WS struct {
-	connCtx context.Context
-	cancel  context.CancelFunc
+	connCtx, masterCtx context.Context
+	cancel             context.CancelFunc
 
 	errHandler func(error)
+
+	h            *HTTPClient
+	refreshToken string
 
 	equityHandler       func(*Equity)
 	futureHandler       func(*Future)
@@ -38,8 +45,10 @@ type WS struct {
 	chartEquityHandler  func(*ChartEquity)
 	chartFutureHandler  func(*ChartFuture)
 
-	pingEvery   time.Duration
-	pongHandler func(time.Time)
+	reconnectAttempts uint8
+	opts              *websocket.DialOptions
+	pingEvery         time.Duration
+	pongHandler       func(time.Time)
 
 	logger *slog.Logger
 	fm     fanoutMutex
@@ -105,24 +114,27 @@ func WithChartFutureHandler(fn func(*ChartFuture)) WSOpt {
 // this is a no-op
 func WithPongHandler(fn func(time.Time)) WSOpt { return func(w *WS) { w.pongHandler = fn } }
 
+// Adjust how many reconnect attempts there will be
+func WithReconnectAttempts(x uint8) WSOpt { return func(w *WS) { w.reconnectAttempts = x } }
+
+// NewSocket will create a new *WS. The context passed will control the life of all connections; to kill the socket's connections,
+// you can cancel the context, or call Close directly, which cancels all internal contexts
 func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, refreshToken string, wsOpts ...WSOpt) (*WS, error) {
-	if h == nil {
+	switch {
+	case h == nil:
 		return nil, ErrMissingHTTPClient
+	case refreshToken == "":
+		return nil, ErrMissingRefreshToken
 	}
 
-	t, err := h.Authenticate(ctx, refreshToken)
-	if err != nil {
-		return nil, err
-	}
-
-	connCtx, cancel := context.WithCancel(ctx)
 	s := &WS{
-		logger:      slog.New(slog.DiscardHandler),
-		fm:          fanoutMutex{timeout: DefaultWSTimeout},
-		pingEvery:   DefaultPingEvery,
-		connCtx:     connCtx,
-		cancel:      cancel,
-		pongHandler: func(t time.Time) {},
+		masterCtx:    ctx,
+		opts:         opts,
+		refreshToken: refreshToken,
+		h:            h,
+		logger:       slog.New(slog.DiscardHandler),
+		fm:           fanoutMutex{timeout: DefaultWSTimeout},
+		pingEvery:    DefaultPingEvery,
 	}
 
 	for _, v := range wsOpts {
@@ -135,46 +147,90 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		}
 	}
 
+	return s, s.connLoop()
+}
+
+func (s *WS) connLoop() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	reconnect := uint16(s.reconnectAttempts)
+	if reconnect == 0 {
+		reconnect = math.MaxUint16
+	}
+
+	for {
+		err := s.connect()
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, context.Canceled):
+			s.logger.ErrorContext(s.masterCtx, "parent context killed", "err", err)
+			return context.Canceled
+		default:
+		}
+
+		if reconnect--; reconnect == 0 {
+			break
+		}
+
+		s.logger.ErrorContext(s.masterCtx, "failed reconnect; sleeping", "err", err, "attempts left", reconnect)
+		time.Sleep(s.fm.timeout)
+	}
+
+	s.logger.ErrorContext(s.masterCtx, "failed all reconnects, exiting")
+	return ErrReconnectExhausted
+}
+
+func (s *WS) connect() error {
+	ctx := s.masterCtx
+
+	t, err := s.h.Authenticate(s.masterCtx, s.refreshToken)
+	if err != nil {
+		return err
+	}
+
 	s.logger.InfoContext(ctx, "fetching user preferences")
-	prefs, err := h.GetUserPreference(ctx)
+	prefs, err := s.h.GetUserPreference(ctx)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed fetching user prefs", "err", err)
-		return nil, err
+		return err
 	}
 
 	if len(prefs.StreamerInfo) == 0 {
 		s.logger.ErrorContext(ctx, "user prefs is blank. This is needed to connect to the socket URL", "resp", prefs)
-		return nil, fmt.Errorf("can't connect: no stream info returned. Resp: %+v", prefs)
+		return fmt.Errorf("can't connect: no stream info returned. Resp: %+v", prefs)
 	}
 
 	i := prefs.StreamerInfo[0]
 	s.customerID = i.SchwabClientCustomerId
 	s.correlID = i.SchwabClientCorrelId
 
-	s.ws, _, err = websocket.Dial(ctx, i.StreamerSocketURL, opts)
+	s.ws, _, err = websocket.Dial(ctx, i.StreamerSocketURL, s.opts)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed dialing websocket", "err", err, "options", opts)
-		return nil, err
+		s.logger.ErrorContext(ctx, "failed dialing websocket", "err", err, "options", s.opts)
+		return err
 	}
 
-	go s.keepalive(ctx)
+	s.connCtx, s.cancel = context.WithCancel(ctx)
+	go s.keepalive()
 	defer func() {
 		if err != nil {
-			cancel()
+			s.cancel()
 			s.ws.Close(websocket.StatusInternalError, "failed setup of client")
 		}
 	}()
 
 	resp, err := s.login(ctx, t.AccessToken, i.SchwabClientChannel, i.SchwabClientFunctionId)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	s.logger.InfoContext(ctx, "login successful", "type", resp.ConnStatus, "server", resp.Server)
 	s.ConnStatus = resp.ConnStatus
 	s.Server = resp.Server
-
-	return s, nil
+	return nil
 }
 
 func (s *WS) genericReq(ctx context.Context, svc service, cmd command, params any) (*WSResp, error) {

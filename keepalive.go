@@ -85,19 +85,26 @@ func (s *WS) ping(ctx context.Context) {
 	}
 }
 
-func (s *WS) keepalive(ctx context.Context) {
+func (s *WS) keepalive() {
+	ctx := s.connCtx
+
 	ch := make(chan []byte, 10)
 	go s.ping(ctx)
 	go s.deserialize(ctx, ch)
+
 	for {
 		buf, err := s.read(ctx)
-		if err != nil {
-			close(ch)
-			return
+		if err == nil {
+			s.logger.DebugContext(ctx, "payload received", "raw", string(buf))
+			ch <- buf
 		}
 
-		s.logger.DebugContext(ctx, "payload received", "raw", string(buf))
-		ch <- buf
+		s.cancel()
+		close(ch)
+		if err = s.connLoop(); err != nil {
+			return
+		}
+		go s.keepalive()
 	}
 }
 
@@ -105,7 +112,7 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 	_, buf, err := s.ws.Read(ctx)
 	if err != nil {
 		switch {
-		case errors.Is(err, context.Canceled):
+		case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 			defer cancel()
 
@@ -196,7 +203,9 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 
 		for _, v := range r.Notify {
 			if !v.heartbeat.IsZero() {
-				s.pongHandler(v.heartbeat)
+				if s.pongHandler != nil {
+					go s.pongHandler(v.heartbeat)
+				}
 				continue
 			}
 
@@ -204,7 +213,7 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 				continue
 			}
 
-			s.errHandler(&v.resp)
+			go s.errHandler(&v.resp)
 		}
 	}
 }

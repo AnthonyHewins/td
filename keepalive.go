@@ -65,7 +65,9 @@ func (s *WS) ping(ctx context.Context) {
 			return
 		case <-t.C:
 			if err := s.ws.Ping(s.connCtx); err != nil {
-				go s.errHandler(err)
+				s.cancel()
+				s.errHandler(err)
+				return
 			}
 		}
 	}

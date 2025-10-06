@@ -114,7 +114,8 @@ func WithChartFutureHandler(fn func(*ChartFuture)) WSOpt {
 // this is a no-op
 func WithPongHandler(fn func(time.Time)) WSOpt { return func(w *WS) { w.pongHandler = fn } }
 
-// Adjust how many reconnect attempts there will be
+// Adjust how many reconnect attempts there will be. Set to 0 for math.MaxUint16 attempts.
+// After each attempt, there will be a time.Sleep called equal to timeout for each request
 func WithReconnectAttempts(x uint8) WSOpt { return func(w *WS) { w.reconnectAttempts = x } }
 
 // NewSocket will create a new *WS. The context passed will control the life of all connections; to kill the socket's connections,
@@ -127,14 +128,19 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		return nil, ErrMissingRefreshToken
 	}
 
+	if opts == nil {
+		opts = &websocket.DialOptions{HTTPClient: h.http}
+	}
+
 	s := &WS{
-		masterCtx:    ctx,
-		opts:         opts,
-		refreshToken: refreshToken,
-		h:            h,
-		logger:       slog.New(slog.DiscardHandler),
-		fm:           fanoutMutex{timeout: DefaultWSTimeout},
-		pingEvery:    DefaultPingEvery,
+		masterCtx:         ctx,
+		opts:              opts,
+		refreshToken:      refreshToken,
+		h:                 h,
+		logger:            slog.New(slog.DiscardHandler),
+		fm:                fanoutMutex{timeout: DefaultWSTimeout},
+		pingEvery:         DefaultPingEvery,
+		reconnectAttempts: DefaultReconnectAttempts,
 	}
 
 	for _, v := range wsOpts {

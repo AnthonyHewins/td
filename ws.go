@@ -69,6 +69,8 @@ func WithErrHandler(x func(error)) WSOpt {
 	return func(w *WS) { w.errHandler = x }
 }
 
+// Add a log handler if you want logs to appear.
+// If the handler is nil, slog.DiscardHandler will be used
 func WithLogger(l slog.Handler) WSOpt {
 	if l == nil {
 		l = slog.DiscardHandler

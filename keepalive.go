@@ -55,20 +55,6 @@ func (h *notifyMsg) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (s *WS) closeErr(err error) {
-	s.cancel()
-	go s.errHandler(err)
-
-	status := websocket.CloseStatus(err)
-	if status == -1 || status == 0 {
-		status = websocket.StatusInternalError
-	}
-
-	if err = s.ws.Close(status, err.Error()); err != nil {
-		go s.errHandler(err)
-	}
-}
-
 func (s *WS) ping(ctx context.Context) {
 	t := time.NewTicker(s.pingEvery)
 	defer t.Stop()
@@ -103,24 +89,34 @@ func (s *WS) keepalive(ctx context.Context) {
 
 func (s *WS) read(ctx context.Context) ([]byte, error) {
 	_, buf, err := s.ws.Read(ctx)
-	if err != nil {
-		switch {
-		case errors.Is(err, context.Canceled):
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-
-			s.Close(ctx)
-		case err == net.ErrClosed:
-			s.cancel()
-			s.errHandler(err)
-		default:
-			s.closeErr(fmt.Errorf("unknown error causing close (%w):\n%w", net.ErrClosed, err))
-		}
-
-		return nil, err
+	if err == nil {
+		return buf, nil
 	}
 
-	return buf, nil
+	s.cancel()
+	s.errHandler(err)
+
+	switch {
+	case errors.Is(err, context.Canceled):
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		defer cancel()
+
+		s.Close(ctx)
+	case errors.Is(err, net.ErrClosed):
+		return nil, err
+	default:
+	}
+
+	status := websocket.CloseStatus(err)
+	if status <= 0 {
+		status = websocket.StatusInternalError
+	}
+
+	if closeErr := s.ws.Close(status, err.Error()); closeErr != nil {
+		s.errHandler(closeErr)
+	}
+
+	return nil, err
 }
 
 func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {

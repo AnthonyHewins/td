@@ -112,18 +112,20 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 		return buf, nil
 	}
 
-	s.logger.ErrorContext(ctx, "failed reading buffer", "err", err, "buffer", string(buf))
 	s.keepaliveErr(err)
 
 	switch {
 	case errors.Is(err, context.Canceled):
+		s.logger.ErrorContext(ctx, "context killed, closing connection", "err", err)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
 
 		s.Close(ctx)
 	case errors.Is(err, net.ErrClosed):
+		s.logger.ErrorContext(ctx, "websocket closed", "err", err)
 		return nil, err
 	default:
+		s.logger.ErrorContext(ctx, "failed reading buffer", "err", err, "buffer", string(buf))
 	}
 
 	status := websocket.CloseStatus(err)
@@ -131,7 +133,7 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 	case status <= 0:
 		status = websocket.StatusInternalError
 	case status == 30: // TD expired the socket
-		return nil, err
+		return nil, net.ErrClosed
 	}
 
 	if closeErr := s.ws.Close(status, err.Error()); closeErr != nil {

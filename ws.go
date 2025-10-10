@@ -125,16 +125,11 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		connCtx:     connCtx,
 		cancel:      cancel,
 		pongHandler: func(t time.Time) {},
+		errHandler:  func(err error) {},
 	}
 
 	for _, v := range wsOpts {
 		v(s)
-	}
-
-	if s.errHandler == nil {
-		s.errHandler = func(err error) {
-			s.logger.Error("error received in keepalive async loop", "keepalive", true, "err", err)
-		}
 	}
 
 	s.logger.InfoContext(ctx, "fetching user preferences")

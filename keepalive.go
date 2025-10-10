@@ -55,19 +55,30 @@ func (h *notifyMsg) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+func (s *WS) keepaliveErr(err error) {
+	s.cancel()
+	s.errHandler(err)
+}
+
 func (s *WS) ping(ctx context.Context) {
 	t := time.NewTicker(s.pingEvery)
 	defer t.Stop()
 
+	var pingCounter uint32 = 0
 	for done := ctx.Done(); ; {
 		select {
 		case <-done:
+			s.logger.ErrorContext(ctx, "ping routine ctx killed", "err", ctx.Err())
 			return
 		case <-t.C:
 			if err := s.ws.Ping(s.connCtx); err != nil {
-				s.cancel()
-				s.errHandler(err)
+				s.logger.ErrorContext(ctx, "ping failed", "err", err, "successfulPings", pingCounter)
+				s.keepaliveErr(err)
 				return
+			}
+
+			if pingCounter++; pingCounter%100 == 0 {
+				s.logger.InfoContext(ctx, "ping heartbeat", "totalPings", pingCounter)
 			}
 		}
 	}
@@ -77,6 +88,7 @@ func (s *WS) keepalive(ctx context.Context) {
 	ch := make(chan []byte, 10)
 	go s.ping(ctx)
 	go s.deserialize(ctx, ch)
+	var heartbeat uint
 	for {
 		buf, err := s.read(ctx)
 		if err != nil {
@@ -84,7 +96,12 @@ func (s *WS) keepalive(ctx context.Context) {
 			return
 		}
 
-		s.logger.DebugContext(ctx, "payload received", "raw", string(buf))
+		if heartbeat++; heartbeat%300 == 0 {
+			s.logger.InfoContext(ctx, "heartbeat payload received", "count", heartbeat, "raw", string(buf))
+		} else {
+			s.logger.DebugContext(ctx, "payload received", "raw", string(buf))
+		}
+
 		ch <- buf
 	}
 }
@@ -95,8 +112,8 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 		return buf, nil
 	}
 
-	s.cancel()
-	s.errHandler(err)
+	s.logger.ErrorContext(ctx, "failed reading buffer", "err", err, "buffer", string(buf))
+	s.keepaliveErr(err)
 
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -110,8 +127,11 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 	}
 
 	status := websocket.CloseStatus(err)
-	if status <= 0 {
+	switch {
+	case status <= 0:
 		status = websocket.StatusInternalError
+	case status == 30: // TD expired the socket
+		return nil, err
 	}
 
 	if closeErr := s.ws.Close(status, err.Error()); closeErr != nil {
@@ -127,15 +147,18 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 		var b []byte
 		select {
 		case <-d:
+			s.logger.ErrorContext(ctx, "deserialize goroutine ctx killed", "err", ctx.Done())
 			return
 		case b = <-ch:
 			if b == nil {
+				s.logger.ErrorContext(ctx, "nil buffer received, deserialize chan closed")
 				return
 			}
 		}
 
 		var r streamResp
 		if err := json.Unmarshal(b, &r); err != nil {
+			s.logger.ErrorContext(ctx, "failed deserializing socket response", "err", err, "buffer", string(b))
 			s.errHandler(fmt.Errorf("failed deserializing socket response: %w\nRaw: %s", err, b))
 			return
 		}
@@ -210,7 +233,7 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 func handlerMaker[X any](logger *slog.Logger, data dataResp, errHandler func(error), handler func(X)) {
 	var x []X
 	if err := json.Unmarshal(data.Content, &x); err != nil {
-		logger.Error("failed unmarshal into correct response type", "raw", data)
+		logger.Error("failed unmarshal into correct response type", "raw", data, "err", err)
 		errHandler(err)
 		return
 	}

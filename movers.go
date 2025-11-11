@@ -8,20 +8,20 @@ import (
 	"github.com/google/go-querystring/query"
 )
 
-type SymbolId string
+type SymbolID string
 
 const (
-	SymbolIdDJI        SymbolId = "$DJI"
-	SymbolIdCOMPX      SymbolId = "$COMPX"
-	SymbolIdSPY        SymbolId = "$SPX"
-	SymbolIdNYSE       SymbolId = "NYSE"
-	SymbolIdNASDAQ     SymbolId = "NASDAQ"
-	SymbolIdOTCBB      SymbolId = "OTCBB"
-	SymbolIdIndexAll   SymbolId = "INDEX_ALL"
-	SymbolIdEquityAll  SymbolId = "EQUITY_ALL"
-	SymbolIdOptionAll  SymbolId = "OPTION_ALL"
-	SymbolIdOptionPut  SymbolId = "OPTION_PUT"
-	SymbolIdOptionCall SymbolId = "OPTION_CALL"
+	SymbolIdDJI        SymbolID = "$DJI"
+	SymbolIdCOMPX      SymbolID = "$COMPX"
+	SymbolIdSPY        SymbolID = "$SPX"
+	SymbolIdNYSE       SymbolID = "NYSE"
+	SymbolIdNASDAQ     SymbolID = "NASDAQ"
+	SymbolIdOTCBB      SymbolID = "OTCBB"
+	SymbolIdIndexAll   SymbolID = "INDEX_ALL"
+	SymbolIdEquityAll  SymbolID = "EQUITY_ALL"
+	SymbolIdOptionAll  SymbolID = "OPTION_ALL"
+	SymbolIdOptionPut  SymbolID = "OPTION_PUT"
+	SymbolIdOptionCall SymbolID = "OPTION_CALL"
 )
 
 type Sort string
@@ -45,16 +45,9 @@ const (
 )
 
 type MoversReq struct {
-	SymbolId  SymbolId
+	SymbolID  SymbolID
 	Sort      Sort
 	Frequency Frequency
-}
-
-func (r *MoversReq) validate() error {
-	switch {
-	default:
-		return nil
-	}
 }
 
 func (p *MoversReq) Encode() (string, error) {
@@ -87,13 +80,8 @@ type Movers struct {
 }
 
 func (c *HTTPClient) Movers(ctx context.Context, req *MoversReq) ([]Movers, error) {
-	switch req {
-	case nil:
+	if req == nil {
 		return nil, ErrMissingReq
-	}
-
-	if err := req.validate(); err != nil {
-		return nil, err
 	}
 
 	encode, err := req.Encode()
@@ -106,8 +94,7 @@ func (c *HTTPClient) Movers(ctx context.Context, req *MoversReq) ([]Movers, erro
 	}
 
 	screen := new(screener)
-	u := fmt.Sprintf("/movers/%s?%s", req.SymbolId, encode)
-	fmt.Println(u)
+	u := fmt.Sprintf("/movers/%s?%s", req.SymbolID, encode)
 
 	err = c.do(ctx, http.MethodGet, u, nil, screen)
 	if err != nil {

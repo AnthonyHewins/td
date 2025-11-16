@@ -149,7 +149,7 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 		var b []byte
 		select {
 		case <-d:
-			s.logger.ErrorContext(ctx, "deserialize goroutine ctx killed", "err", ctx.Done())
+			s.logger.ErrorContext(ctx, "deserialize goroutine ctx killed", "err", ctx.Err())
 			return
 		case b = <-ch:
 			if b == nil {

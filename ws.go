@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -26,8 +27,9 @@ var (
 // WS provides real time updates from TD Ameritrade's streaming API.
 // See https://developer.tdameritrade.com/content/streaming-data for more information.
 type WS struct {
-	connCtx context.Context
-	cancel  context.CancelFunc
+	connCtx        context.Context
+	cancel         context.CancelFunc
+	killedByServer atomic.Bool
 
 	errHandler func(error)
 
@@ -117,12 +119,12 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		return nil, err
 	}
 
-	connCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	s := &WS{
 		logger:      slog.New(slog.DiscardHandler),
 		fm:          fanoutMutex{timeout: DefaultWSTimeout},
 		pingEvery:   DefaultPingEvery,
-		connCtx:     connCtx,
+		connCtx:     ctx,
 		cancel:      cancel,
 		pongHandler: func(t time.Time) {},
 		errHandler:  func(err error) {},
@@ -154,7 +156,7 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		return nil, err
 	}
 
-	go s.keepalive(ctx)
+	go s.keepalive()
 	defer func() {
 		if err != nil {
 			cancel()

@@ -14,8 +14,7 @@ import (
 )
 
 var (
-	ErrForceShutdown        = errors.New("shutdown frame received")
-	ErrTooManyLoggedInConns = errors.New("")
+	ErrForceShutdown = errors.New("shutdown frame received")
 )
 
 type notifyMsg struct {
@@ -227,9 +226,8 @@ func (s *WS) deserialize(ch <-chan []byte) {
 			case WSRespCodeSuccess:
 				continue
 			case WSRespCodeLoginDenied, WSRespCodeCloseConnection, WSRespCodeStopStreaming: // connection is severed
-				s.cancel()
 				s.killedByServer.Store(true)
-				s.errHandler(&v.resp)
+				s.keepaliveErr(&v.resp)
 			default:
 				s.errHandler(&v.resp)
 			}

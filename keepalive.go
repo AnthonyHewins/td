@@ -60,12 +60,12 @@ func (s *WS) keepaliveErr(err error) {
 	s.errHandler(err)
 }
 
-func (s *WS) ping(ctx context.Context) {
+func (s *WS) ping() {
 	t := time.NewTicker(s.pingEvery)
 	defer t.Stop()
 
 	var pingCounter uint32 = 0
-	for done := ctx.Done(); ; {
+	for ctx, done := s.connCtx, s.connCtx.Done(); ; {
 		select {
 		case <-done:
 			s.logger.ErrorContext(ctx, "ping routine ctx killed", "err", ctx.Err())
@@ -77,31 +77,25 @@ func (s *WS) ping(ctx context.Context) {
 				return
 			}
 
-			if pingCounter++; pingCounter%100 == 0 {
+			if pingCounter++; pingCounter%1000 == 0 {
 				s.logger.InfoContext(ctx, "ping heartbeat", "totalPings", pingCounter)
 			}
 		}
 	}
 }
 
-func (s *WS) keepalive(ctx context.Context) {
+func (s *WS) keepalive() {
 	ch := make(chan []byte, 10)
-	go s.ping(ctx)
-	go s.deserialize(ctx, ch)
-	var heartbeat uint
+	go s.ping()
+	go s.deserialize(ch)
 	for {
-		buf, err := s.read(ctx)
+		buf, err := s.read(s.connCtx)
 		if err != nil {
 			close(ch)
 			return
 		}
 
-		if heartbeat++; heartbeat%300 == 0 {
-			s.logger.InfoContext(ctx, "heartbeat payload received", "count", heartbeat, "raw", string(buf))
-		} else {
-			s.logger.DebugContext(ctx, "payload received", "raw", string(buf))
-		}
-
+		s.logger.DebugContext(s.connCtx, "payload received", "raw", string(buf))
 		ch <- buf
 	}
 }
@@ -112,6 +106,10 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 		return buf, nil
 	}
 
+	if s.killedByServer.Load() {
+		return nil, err // server killed conn. quit here, it's handled elsewhere
+	}
+
 	s.keepaliveErr(err)
 
 	switch {
@@ -120,7 +118,7 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
 
-		s.Close(ctx)
+		return nil, errors.Join(err, s.Close(ctx))
 	case errors.Is(err, net.ErrClosed):
 		s.logger.ErrorContext(ctx, "websocket closed", "err", err)
 		return nil, err
@@ -132,7 +130,7 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 	switch {
 	case status <= 0:
 		status = websocket.StatusInternalError
-	case status == 30: // TD expired the socket
+	case status == websocket.StatusNormalClosure || status == 30: // TD expired the socket
 		return nil, net.ErrClosed
 	}
 
@@ -143,7 +141,8 @@ func (s *WS) read(ctx context.Context) ([]byte, error) {
 	return nil, err
 }
 
-func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
+func (s *WS) deserialize(ch <-chan []byte) {
+	ctx := s.connCtx
 	d := ctx.Done()
 	for {
 		var b []byte
@@ -211,7 +210,7 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 				go handlerMaker(s.logger, v, s.errHandler, s.chartFutureHandler)
 			default:
 				s.logger.ErrorContext(s.connCtx, "unknown service type received", "raw", v)
-				go s.errHandler(fmt.Errorf("you subscribed for data for a service that is unimplemented potentially: %s\ndata: %+v", v.Service, v))
+				go s.errHandler(fmt.Errorf("you subscribed for data for a service that is unimplemented: %d\ndata: %+v", v.Service, v))
 			}
 		}
 
@@ -219,15 +218,21 @@ func (s *WS) deserialize(ctx context.Context, ch <-chan []byte) {
 
 		for _, v := range r.Notify {
 			if !v.heartbeat.IsZero() {
-				s.pongHandler(v.heartbeat)
+				if s.pongHandler != nil {
+					s.pongHandler(v.heartbeat)
+				}
 				continue
 			}
 
-			if v.resp.Code == 0 {
+			switch v.resp.Code {
+			case WSRespCodeSuccess:
 				continue
+			case WSRespCodeLoginDenied, WSRespCodeCloseConnection, WSRespCodeStopStreaming: // connection is severed
+				s.killedByServer.Store(true)
+				s.keepaliveErr(&v.resp)
+			default:
+				s.errHandler(&v.resp)
 			}
-
-			s.errHandler(&v.resp)
 		}
 	}
 }

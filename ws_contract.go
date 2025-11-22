@@ -2,12 +2,13 @@ package td
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-//go:generate enumer -type service -json -trimprefix service -transform snake-upper
 type service byte
 
 const (
@@ -26,7 +27,52 @@ const (
 	serviceScreenerEquity
 	serviceScreenerOption
 	serviceAcctActivity
+	serviceInvalidService
 )
+
+func (s *service) UnmarshalJSON(b []byte) error {
+	var x string
+	if err := json.Unmarshal(b, &x); err != nil {
+		return fmt.Errorf("failed unmarshal of service enum: %w", err)
+	}
+
+	switch {
+	case strings.EqualFold(x, "ADMIN"):
+		*s = serviceAdmin
+	case strings.EqualFold(x, "INVALID SERVICE"):
+		*s = serviceInvalidService
+	case strings.EqualFold(x, "LEVELONE_EQUITIES"):
+		*s = serviceLeveloneEquities
+	case strings.EqualFold(x, "LEVELONE_OPTIONS"):
+		*s = serviceLeveloneOptions
+	case strings.EqualFold(x, "LEVELONE_FUTURES"):
+		*s = serviceLeveloneFutures
+	case strings.EqualFold(x, "LEVELONE_FUTURES_OPTIONS"):
+		*s = serviceLeveloneFuturesOptions
+	case strings.EqualFold(x, "LEVELONE_FOREX"):
+		*s = serviceLeveloneForex
+	case strings.EqualFold(x, "NYSE_BOOK"):
+		*s = serviceNyseBook
+	case strings.EqualFold(x, "NASDAQ_BOOK"):
+		*s = serviceNasdaqBook
+	case strings.EqualFold(x, "OPTIONS_BOOK"):
+		*s = serviceOptionsBook
+	case strings.EqualFold(x, "CHART_EQUITY"):
+		*s = serviceChartEquity
+	case strings.EqualFold(x, "CHART_FUTURES"):
+		*s = serviceChartFutures
+	case strings.EqualFold(x, "SCREENER_EQUITY"):
+		*s = serviceScreenerEquity
+	case strings.EqualFold(x, "SCREENER_OPTION"):
+		*s = serviceScreenerOption
+	case strings.EqualFold(x, "ACCT_ACTIVITY"):
+		*s = serviceAcctActivity
+	default:
+		return fmt.Errorf("invalid service value (case insensitive): %s", x)
+	}
+
+	return nil
+}
 
 //go:generate enumer -type command -json -trimprefix command -transform upper
 type command byte

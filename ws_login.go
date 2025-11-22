@@ -2,6 +2,7 @@ package td
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/coder/websocket"
@@ -70,15 +71,8 @@ func (s *WS) login(ctx context.Context, accessToken, clientChannel, functionID s
 	return loginResp, nil
 }
 
-// Close will attempt a logout, and finally close the websocket connection regardless if
-// the logout succeeded
+// Close will attempt a logout with the WS API, then finally close the socket conn
 func (s *WS) Close(ctx context.Context) error {
-	defer func() {
-		if closeErr := s.ws.Close(websocket.StatusNormalClosure, "user initiated logout/close"); closeErr != nil {
-			s.logger.ErrorContext(ctx, "got error attempting socket close", "err", closeErr)
-		}
-	}()
-
 	req, err := s.do(ctx, serviceAdmin, commandLogout, nil)
 	if err != nil {
 		return err
@@ -95,11 +89,15 @@ func (s *WS) Close(ctx context.Context) error {
 		return err
 	}
 
-	if a.Code == 0 {
-		return nil
+	if a.Code == WSRespCodeSuccess {
+		if err := s.ws.Close(websocket.StatusNormalClosure, "user initiated close"); err != nil {
+			s.logger.ErrorContext(ctx, "failed normal WS closure", "err", err)
+		}
+
+		return err
 	}
 
-	return a
+	return errors.Join(err, s.ws.CloseNow())
 }
 
 func seekLoginResp(s string) string {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -26,8 +27,9 @@ var (
 // WS provides real time updates from TD Ameritrade's streaming API.
 // See https://developer.tdameritrade.com/content/streaming-data for more information.
 type WS struct {
-	connCtx context.Context
-	cancel  context.CancelFunc
+	connCtx        context.Context
+	cancel         context.CancelFunc
+	killedByServer atomic.Bool
 
 	errHandler func(error)
 
@@ -42,8 +44,8 @@ type WS struct {
 	pongHandler func(time.Time)
 
 	logger *slog.Logger
-	fm     fanoutMutex
-	ws     *websocket.Conn
+	fm     fanoutMutexInterface
+	ws     socketConn
 
 	ConnStatus ConnStatus
 	Server     string
@@ -56,7 +58,7 @@ type WSOpt func(w *WS)
 
 // Enforce a per-request timeout different than the default, which is
 // DefaultWSTimeout
-func WithTimeout(t time.Duration) WSOpt { return func(w *WS) { w.fm.timeout = t } }
+func WithTimeout(t time.Duration) WSOpt { return func(w *WS) { w.fm.setTimeout(t) } }
 
 // Anytime there is an error in the keepalive goroutine, the function passed in here
 // will be called if you want to do something custom. By default, when errors are received,
@@ -117,15 +119,14 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		return nil, err
 	}
 
-	connCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	s := &WS{
-		logger:      slog.New(slog.DiscardHandler),
-		fm:          fanoutMutex{timeout: DefaultWSTimeout},
-		pingEvery:   DefaultPingEvery,
-		connCtx:     connCtx,
-		cancel:      cancel,
-		pongHandler: func(t time.Time) {},
-		errHandler:  func(err error) {},
+		logger:     slog.New(slog.DiscardHandler),
+		fm:         &fanoutMutex{timeout: DefaultWSTimeout},
+		pingEvery:  DefaultPingEvery,
+		connCtx:    ctx,
+		cancel:     cancel,
+		errHandler: func(err error) {},
 	}
 
 	for _, v := range wsOpts {
@@ -154,7 +155,7 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 		return nil, err
 	}
 
-	go s.keepalive(ctx)
+	go s.keepalive()
 	defer func() {
 		if err != nil {
 			cancel()

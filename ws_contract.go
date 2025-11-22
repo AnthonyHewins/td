@@ -30,6 +30,43 @@ const (
 	serviceInvalidService
 )
 
+func (s service) MarshalJSON() ([]byte, error) {
+	switch s {
+	case serviceAdmin:
+		return []byte(`"ADMIN"`), nil
+	case serviceInvalidService:
+		return []byte(`"Invalid service"`), nil
+	case serviceLeveloneEquities:
+		return []byte(`"LEVELONE_EQUITIES"`), nil
+	case serviceLeveloneOptions:
+		return []byte(`"LEVELONE_OPTIONS"`), nil
+	case serviceLeveloneFutures:
+		return []byte(`"LEVELONE_FUTURES"`), nil
+	case serviceLeveloneFuturesOptions:
+		return []byte(`"LEVELONE_FUTURES_OPTIONS"`), nil
+	case serviceLeveloneForex:
+		return []byte(`"LEVELONE_FOREX"`), nil
+	case serviceNyseBook:
+		return []byte(`"NYSE_BOOK"`), nil
+	case serviceNasdaqBook:
+		return []byte(`"NASDAQ_BOOK"`), nil
+	case serviceOptionsBook:
+		return []byte(`"OPTIONS_BOOK"`), nil
+	case serviceChartEquity:
+		return []byte(`"CHART_EQUITY"`), nil
+	case serviceChartFutures:
+		return []byte(`"CHART_FUTURES"`), nil
+	case serviceScreenerEquity:
+		return []byte(`"SCREENER_EQUITY"`), nil
+	case serviceScreenerOption:
+		return []byte(`"SCREENER_OPTION"`), nil
+	case serviceAcctActivity:
+		return []byte(`"ACCT_ACTIVITY"`), nil
+	default:
+		return nil, fmt.Errorf("invalid service %d", s)
+	}
+}
+
 func (s *service) UnmarshalJSON(b []byte) error {
 	var x string
 	if err := json.Unmarshal(b, &x); err != nil {

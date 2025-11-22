@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:generate enumer -type service -json -trimprefix service -transform snake-upper
 type service byte
 
 const (

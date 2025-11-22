@@ -44,8 +44,8 @@ type WS struct {
 	pongHandler func(time.Time)
 
 	logger *slog.Logger
-	fm     fanoutMutex
-	ws     *websocket.Conn
+	fm     fanoutMutexInterface
+	ws     socketConn
 
 	ConnStatus ConnStatus
 	Server     string
@@ -58,7 +58,7 @@ type WSOpt func(w *WS)
 
 // Enforce a per-request timeout different than the default, which is
 // DefaultWSTimeout
-func WithTimeout(t time.Duration) WSOpt { return func(w *WS) { w.fm.timeout = t } }
+func WithTimeout(t time.Duration) WSOpt { return func(w *WS) { w.fm.setTimeout(t) } }
 
 // Anytime there is an error in the keepalive goroutine, the function passed in here
 // will be called if you want to do something custom. By default, when errors are received,
@@ -121,13 +121,12 @@ func NewSocket(ctx context.Context, opts *websocket.DialOptions, h *HTTPClient, 
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &WS{
-		logger:      slog.New(slog.DiscardHandler),
-		fm:          fanoutMutex{timeout: DefaultWSTimeout},
-		pingEvery:   DefaultPingEvery,
-		connCtx:     ctx,
-		cancel:      cancel,
-		pongHandler: func(t time.Time) {},
-		errHandler:  func(err error) {},
+		logger:     slog.New(slog.DiscardHandler),
+		fm:         &fanoutMutex{timeout: DefaultWSTimeout},
+		pingEvery:  DefaultPingEvery,
+		connCtx:    ctx,
+		cancel:     cancel,
+		errHandler: func(err error) {},
 	}
 
 	for _, v := range wsOpts {

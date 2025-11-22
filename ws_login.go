@@ -90,7 +90,11 @@ func (s *WS) Close(ctx context.Context) error {
 	}
 
 	if a.Code == WSRespCodeSuccess {
-		return s.ws.Close(websocket.StatusNormalClosure, "user initiated close")
+		if err := s.ws.Close(websocket.StatusNormalClosure, "user initiated close"); err != nil {
+			s.logger.ErrorContext(ctx, "failed normal WS closure", "err", err)
+		}
+
+		return err
 	}
 
 	return errors.Join(err, s.ws.CloseNow())

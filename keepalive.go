@@ -218,7 +218,9 @@ func (s *WS) deserialize(ch <-chan []byte) {
 
 		for _, v := range r.Notify {
 			if !v.heartbeat.IsZero() {
-				s.pongHandler(v.heartbeat)
+				if s.pongHandler != nil {
+					s.pongHandler(v.heartbeat)
+				}
 				continue
 			}
 

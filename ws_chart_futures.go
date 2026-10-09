@@ -67,8 +67,7 @@ type ChartFutureReq struct {
 
 func (f *ChartFutureReq) MarshalJSON() ([]byte, error) {
 	m := make(map[string]string, 2)
-	if n := len(f.Symbols); n > 0 {
-		n--
+	if n := len(f.Symbols) - 1; n >= 0 {
 		var sb strings.Builder
 		for i, v := range f.Symbols {
 			if len(v) <= 1 {
@@ -80,7 +79,7 @@ func (f *ChartFutureReq) MarshalJSON() ([]byte, error) {
 			}
 
 			sb.WriteString(v)
-			if n-1 != i {
+			if i != n {
 				sb.WriteRune(',')
 			}
 		}

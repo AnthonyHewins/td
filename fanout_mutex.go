@@ -14,6 +14,7 @@ var (
 	ErrBufferManagerForcedTimeout = errors.New("buffer manager closed request; it timed out")
 )
 
+//go:generate goku iface fanoutMutex -m fanoutMock -o fanout_mutex_interface.go --private
 type fanoutMutex struct {
 	mu       sync.Mutex
 	timeout  time.Duration
@@ -79,6 +80,8 @@ func (s *WS) wait(ctx context.Context, f *socketReq) (v *apiResp, err error) {
 
 	return nil, err
 }
+
+func (f *fanoutMutex) setTimeout(t time.Duration) { f.timeout = t }
 
 func (f *fanoutMutex) request() *socketReq {
 	f.mu.Lock()

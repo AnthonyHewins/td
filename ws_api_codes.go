@@ -104,5 +104,5 @@ func (w *WSRespCode) UnmarshalJSON(b []byte) error {
 }
 
 func (w *WSRespCode) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%s"`, w.String())), nil
+	return fmt.Appendf([]byte{}, `"%s"`, w.String()), nil
 }

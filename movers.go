@@ -2,37 +2,46 @@ package td
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-
-	"github.com/google/go-querystring/query"
+	"net/url"
+	"strconv"
 )
 
-type SymbolID string
+// SymbolID is the index or market the movers endpoint ranks
+//
+//go:generate enumer -type SymbolID -json -trimprefix SymbolID -linecomment
+type SymbolID byte
 
 const (
-	SymbolIdDJI        SymbolID = "$DJI"
-	SymbolIdCOMPX      SymbolID = "$COMPX"
-	SymbolIdSPY        SymbolID = "$SPX"
-	SymbolIdNYSE       SymbolID = "NYSE"
-	SymbolIdNASDAQ     SymbolID = "NASDAQ"
-	SymbolIdOTCBB      SymbolID = "OTCBB"
-	SymbolIdIndexAll   SymbolID = "INDEX_ALL"
-	SymbolIdEquityAll  SymbolID = "EQUITY_ALL"
-	SymbolIdOptionAll  SymbolID = "OPTION_ALL"
-	SymbolIdOptionPut  SymbolID = "OPTION_PUT"
-	SymbolIdOptionCall SymbolID = "OPTION_CALL"
+	SymbolIDUnspecified SymbolID = iota
+	SymbolIDDJI                  // $DJI
+	SymbolIDCOMPX                // $COMPX
+	SymbolIDSPX                  // $SPX
+	SymbolIDNYSE                 // NYSE
+	SymbolIDNASDAQ               // NASDAQ
+	SymbolIDOTCBB                // OTCBB
+	SymbolIDIndexAll             // INDEX_ALL
+	SymbolIDEquityAll            // EQUITY_ALL
+	SymbolIDOptionAll            // OPTION_ALL
+	SymbolIDOptionPut            // OPTION_PUT
+	SymbolIDOptionCall           // OPTION_CALL
 )
 
-type Sort string
+// Sort is how movers are ranked. Unspecified leaves it to Schwab
+//
+//go:generate enumer -type Sort -json -trimprefix Sort -transform snake-upper
+type Sort byte
 
 const (
-	SortVolume            Sort = "VOLUME"
-	SortTrades            Sort = "TRADES"
-	SortPercentChangeUp   Sort = "PERCENT_CHANGE_UP"
-	SortPercentChangeDown Sort = "PERCENT_CHANGE_DOWN"
+	SortUnspecified Sort = iota
+	SortVolume
+	SortTrades
+	SortPercentChangeUp
+	SortPercentChangeDown
 )
 
+// Frequency is the minimum percent change for a mover. The wire value is the
+// number itself
 type Frequency int32
 
 const (
@@ -50,21 +59,15 @@ type MoversReq struct {
 	Frequency Frequency
 }
 
-func (p *MoversReq) Encode() (string, error) {
-	req := struct {
-		Sort      Sort      `url:"sort,omitempty"`
-		Frequency Frequency `url:"frequency"`
-	}{
-		Sort:      p.Sort,
-		Frequency: p.Frequency,
+// Encode returns the query string. The symbol ID goes in the path, not here
+func (p *MoversReq) Encode() string {
+	q := url.Values{}
+	q.Set("frequency", strconv.Itoa(int(p.Frequency)))
+	if p.Sort != SortUnspecified {
+		q.Set("sort", p.Sort.String())
 	}
 
-	q, err := query.Values(req)
-	if err != nil {
-		return "", err
-	}
-
-	return q.Encode(), nil
+	return q.Encode()
 }
 
 type Movers struct {
@@ -84,9 +87,8 @@ func (c *HTTPClient) Movers(ctx context.Context, req *MoversReq) ([]Movers, erro
 		return nil, ErrMissingReq
 	}
 
-	encode, err := req.Encode()
-	if err != nil {
-		return nil, err
+	if req.SymbolID == SymbolIDUnspecified || !req.SymbolID.IsASymbolID() {
+		return nil, ErrMissingSymbol
 	}
 
 	type screener struct {
@@ -94,10 +96,9 @@ func (c *HTTPClient) Movers(ctx context.Context, req *MoversReq) ([]Movers, erro
 	}
 
 	screen := new(screener)
-	u := fmt.Sprintf("/movers/%s?%s", req.SymbolID, encode)
+	u := "/movers/" + url.PathEscape(req.SymbolID.String()) + "?" + req.Encode()
 
-	err = c.do(ctx, http.MethodGet, u, nil, screen)
-	if err != nil {
+	if err := c.do(ctx, http.MethodGet, u, nil, screen); err != nil {
 		return nil, err
 	}
 

@@ -2,6 +2,7 @@ package td
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
@@ -62,6 +63,17 @@ func TestSymbolIDWireNames(t *testing.T) {
 	for id, name := range want {
 		if id.String() != name {
 			t.Errorf("SymbolID %d: expected %s, got %s", id, name, id.String())
+		}
+
+		// the $ in the index names survives enumer's JSON round trip
+		b, err := json.Marshal(id)
+		if err != nil || string(b) != `"`+name+`"` {
+			t.Errorf("SymbolID %d: marshals as %s (%v)", id, b, err)
+		}
+
+		var back SymbolID
+		if err := json.Unmarshal(b, &back); err != nil || back != id {
+			t.Errorf("SymbolID %d: %s unmarshals as %d (%v)", id, b, back, err)
 		}
 	}
 }

@@ -3,9 +3,7 @@ package td
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 )
@@ -20,11 +18,11 @@ const aaplFundamental = `{"instruments":[{"fundamental":{"symbol":"AAPL","high52
 	"fundLeverageFactor":0.0},
 	"cusip":"037833100","symbol":"AAPL","description":"APPLE INC","exchange":"NASDAQ","assetType":"EQUITY"}]}`
 
-func date(y int, m time.Month, d int) FundamentalDate {
-	return FundamentalDate{time.Date(y, m, d, 0, 0, 0, 0, time.UTC)}
+func date(y int, m time.Month, d int) time.Time {
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
-func TestFundamentals(t *testing.T) {
+func TestInstruments_Fundamental(t *testing.T) {
 	var gotSymbol, gotProjection string
 	c := newTestClient(t, map[string]http.HandlerFunc{
 		"/instruments": func(w http.ResponseWriter, r *http.Request) {
@@ -33,9 +31,9 @@ func TestFundamentals(t *testing.T) {
 		},
 	})
 
-	got, err := c.Fundamentals(context.Background(), "AAPL")
+	got, err := c.Instruments(context.Background(), ProjectionFundamental, "AAPL")
 	if err != nil {
-		t.Fatalf("Fundamentals: %v", err)
+		t.Fatalf("Instruments: %v", err)
 	}
 
 	if gotSymbol != "AAPL" || gotProjection != "fundamental" {
@@ -60,7 +58,7 @@ func TestFundamentals(t *testing.T) {
 		{"peRatio", f.PeRatio, 38.62192},
 		{"sharesOutstanding", f.SharesOutstanding, 14594180000.0},
 		{"marketCap", f.MarketCap, 4869056273400.0},
-		{"avg10DaysVolume", f.Avg10DaysVolume, int64(34211662)},
+		{"avg10DaysVolume", f.Avg10DaysVolume, 34211662},
 		{"dividendFreq", f.DividendFreq, 4},
 		{"dividendDate", f.DividendDate, date(2026, time.August, 10)},
 		{"nextDividendPayDate", f.NextDividendPayDate, date(2026, time.November, 13)},
@@ -74,7 +72,7 @@ func TestFundamentals(t *testing.T) {
 	}
 }
 
-func TestFundamentals_NoDividend(t *testing.T) {
+func TestInstruments_FundamentalNoDividend(t *testing.T) {
 	c := newTestClient(t, map[string]http.HandlerFunc{
 		"/instruments": func(w http.ResponseWriter, r *http.Request) {
 			// a stock without dividends: Schwab leaves the dividend dates out
@@ -83,9 +81,9 @@ func TestFundamentals_NoDividend(t *testing.T) {
 		},
 	})
 
-	got, err := c.Fundamentals(context.Background(), "TSLA")
+	got, err := c.Instruments(context.Background(), ProjectionFundamental, "TSLA")
 	if err != nil {
-		t.Fatalf("Fundamentals: %v", err)
+		t.Fatalf("Instruments: %v", err)
 	}
 
 	f := got[0].Fundamental
@@ -94,71 +92,41 @@ func TestFundamentals_NoDividend(t *testing.T) {
 	}
 }
 
-func TestFundamentals_Batches(t *testing.T) {
-	symbols := make([]string, MaxFundamentalSymbols+1)
-	for i := range symbols {
-		symbols[i] = fmt.Sprintf("S%03d", i)
-	}
-
-	var requests [][]string
-	c := newTestClient(t, map[string]http.HandlerFunc{
-		"/instruments": func(w http.ResponseWriter, r *http.Request) {
-			batch := strings.Split(r.URL.Query().Get("symbol"), ",")
-			requests = append(requests, batch)
-
-			var rows []string
-			for _, s := range batch {
-				rows = append(rows, `{"symbol":"`+s+`","assetType":"EQUITY","fundamental":{"symbol":"`+s+`"}}`)
-			}
-			w.Write([]byte(`{"instruments":[` + strings.Join(rows, ",") + `]}`))
-		},
-	})
-
-	got, err := c.Fundamentals(context.Background(), symbols...)
-	if err != nil {
-		t.Fatalf("Fundamentals: %v", err)
-	}
-
-	if len(requests) != 2 || len(requests[0]) != MaxFundamentalSymbols || len(requests[1]) != 1 {
-		t.Fatalf("expected batches of %d and 1, got %d requests", MaxFundamentalSymbols, len(requests))
-	}
-
-	if len(got) != len(symbols) || got[0].Symbol != "S000" || got[len(got)-1].Symbol != symbols[len(symbols)-1] {
-		t.Errorf("results out of order or missing: %d instruments", len(got))
-	}
-
-	if _, err := c.Fundamentals(context.Background()); err != ErrMissingSymbol {
-		t.Errorf("no symbols: expected ErrMissingSymbol, got %v", err)
-	}
-}
-
-func TestFundamentalDate(t *testing.T) {
-	var d FundamentalDate
-	if err := json.Unmarshal([]byte(`"2026-11-10 00:00:00.0"`), &d); err != nil {
+func TestFundamental_JSON(t *testing.T) {
+	var f Fundamental
+	if err := json.Unmarshal([]byte(`{"symbol":"AAPL","dividendFreq":4,"dividendDate":"2026-11-10 00:00:00.0",
+		"declarationDate":"","nextDividendDate":null}`), &f); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if d != date(2026, time.November, 10) {
-		t.Errorf("expected 2026-11-10, got %v", d)
+	if f.Symbol != "AAPL" || f.DividendFreq != 4 || !f.DividendDate.Equal(date(2026, time.November, 10)) {
+		t.Errorf("unmarshal: %+v", f)
 	}
 
-	b, err := json.Marshal(d)
-	if err != nil || string(b) != `"2026-11-10 00:00:00.0"` {
-		t.Errorf("round trip: %s, %v", b, err)
+	if !f.DeclarationDate.IsZero() || !f.NextDividendDate.IsZero() {
+		t.Errorf(`expected "" and null to give the zero time, got %v and %v`, f.DeclarationDate, f.NextDividendDate)
 	}
 
-	for _, empty := range []string{`""`, `null`} {
-		var z FundamentalDate
-		if err := json.Unmarshal([]byte(empty), &z); err != nil || !z.IsZero() {
-			t.Errorf("%s: expected the zero date, got %v (%v)", empty, z, err)
-		}
+	// Schwab's layout on the way out too, and unset fields left off
+	b, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
 	}
 
-	if b, _ := json.Marshal(FundamentalDate{}); string(b) != `""` {
-		t.Errorf("zero date marshals as %s", b)
+	if want := `{"symbol":"AAPL","dividendFreq":4,"dividendDate":"2026-11-10 00:00:00.0"}`; string(b) != want {
+		t.Errorf("marshal\nexpected: %s\nactual:   %s", want, b)
 	}
 
-	if err := json.Unmarshal([]byte(`"11/10/2026"`), &d); err == nil {
+	var back Fundamental
+	if err := json.Unmarshal(b, &back); err != nil || back != f {
+		t.Errorf("round trip: %+v (%v)", back, err)
+	}
+
+	if b, _ := json.Marshal(Fundamental{}); string(b) != `{}` {
+		t.Errorf("zero Fundamental marshals as %s", b)
+	}
+
+	if err := json.Unmarshal([]byte(`{"dividendDate":"11/10/2026"}`), &f); err == nil {
 		t.Error("expected an error for an unknown date format")
 	}
 }

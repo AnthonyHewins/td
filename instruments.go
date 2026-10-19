@@ -2,9 +2,18 @@ package td
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
+
+// maxInstrumentSymbols is how many symbols one instruments request takes.
+// The symbols go in the URL: 500 worked and 1,000 got HTTP 414 (URI too long),
+// checked 2026-10-09
+const maxInstrumentSymbols = 250
+
+var ErrTooManySymbols = fmt.Errorf("too many symbols: at most %d per request", maxInstrumentSymbols)
 
 // Projection is how the instruments search reads its symbol argument
 type Projection string
@@ -33,9 +42,15 @@ type Instrument struct {
 
 // Instruments searches Schwab's instruments. With ProjectionSymbolRegex one call
 // can list a whole range of symbols, e.g. "A[A-Z./]*" for every equity, ETF,
-// fund and forex pair starting with A. The exact-symbol projections take a
-// comma-separated list (see Fundamentals for batching)
-func (c *HTTPClient) Instruments(ctx context.Context, symbol string, projection Projection) ([]Instrument, error) {
+// fund and forex pair starting with A. The exact-symbol projections take up to
+// 250 symbols (Schwab's: BRK/B, not BRK.B); more returns ErrTooManySymbols, so
+// batch them yourself. Unknown symbols are left out of the result
+func (c *HTTPClient) Instruments(ctx context.Context, projection Projection, symbols ...string) ([]Instrument, error) {
+	if len(symbols) > maxInstrumentSymbols {
+		return nil, ErrTooManySymbols
+	}
+
+	symbol := strings.Join(symbols, ",")
 	if symbol == "" {
 		return nil, ErrMissingSymbol
 	}

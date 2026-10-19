@@ -2,6 +2,7 @@ package td
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"testing"
@@ -22,7 +23,7 @@ func TestInstruments(t *testing.T) {
 		},
 	})
 
-	got, err := c.Instruments(context.Background(), "A[A-Z./]*", ProjectionSymbolRegex)
+	got, err := c.Instruments(context.Background(), ProjectionSymbolRegex, "A[A-Z./]*")
 	if err != nil {
 		t.Fatalf("Instruments: %v", err)
 	}
@@ -53,7 +54,7 @@ func TestInstruments_NoMatches(t *testing.T) {
 		},
 	})
 
-	got, err := c.Instruments(context.Background(), `\$[A-Z].*`, ProjectionSymbolRegex)
+	got, err := c.Instruments(context.Background(), ProjectionSymbolRegex, `\$[A-Z].*`)
 	if err != nil {
 		t.Fatalf("Instruments: %v", err)
 	}
@@ -71,11 +72,51 @@ func TestInstruments_Errors(t *testing.T) {
 		},
 	})
 
-	if _, err := c.Instruments(context.Background(), "[A-Z]{3}/[A-Z]{3}", ProjectionSymbolRegex); err == nil {
+	if _, err := c.Instruments(context.Background(), ProjectionSymbolRegex, "[A-Z]{3}/[A-Z]{3}"); err == nil {
 		t.Error("expected an error for an HTTP 500")
 	}
 
-	if _, err := c.Instruments(context.Background(), "", ProjectionSymbolSearch); err != ErrMissingSymbol {
-		t.Errorf("expected ErrMissingSymbol, got %v", err)
+	if _, err := c.Instruments(context.Background(), ProjectionSymbolSearch); err != ErrMissingSymbol {
+		t.Errorf("no symbols: expected ErrMissingSymbol, got %v", err)
+	}
+
+	if _, err := c.Instruments(context.Background(), ProjectionSymbolSearch, ""); err != ErrMissingSymbol {
+		t.Errorf("empty symbol: expected ErrMissingSymbol, got %v", err)
+	}
+}
+
+func TestInstruments_Symbols(t *testing.T) {
+	var requests []string
+	c := newTestClient(t, map[string]http.HandlerFunc{
+		"/instruments": func(w http.ResponseWriter, r *http.Request) {
+			requests = append(requests, r.URL.Query().Get("symbol"))
+			w.Write([]byte(`{}`))
+		},
+	})
+
+	if _, err := c.Instruments(context.Background(), ProjectionFundamental, "AAPL", "BRK/B", "MSFT"); err != nil {
+		t.Fatalf("Instruments: %v", err)
+	}
+
+	if len(requests) != 1 || requests[0] != "AAPL,BRK/B,MSFT" {
+		t.Errorf("expected one request for AAPL,BRK/B,MSFT, got %q", requests)
+	}
+
+	// paginating is the caller's job: too many symbols is an error, not a second request
+	symbols := make([]string, maxInstrumentSymbols+1)
+	for i := range symbols {
+		symbols[i] = fmt.Sprintf("S%03d", i)
+	}
+
+	if _, err := c.Instruments(context.Background(), ProjectionFundamental, symbols...); err != ErrTooManySymbols {
+		t.Errorf("expected ErrTooManySymbols, got %v", err)
+	}
+
+	if _, err := c.Instruments(context.Background(), ProjectionFundamental, symbols[:maxInstrumentSymbols]...); err != nil {
+		t.Errorf("%d symbols: %v", maxInstrumentSymbols, err)
+	}
+
+	if len(requests) != 2 {
+		t.Errorf("expected 2 requests, got %d", len(requests))
 	}
 }
